@@ -194,12 +194,15 @@ def get_pet_max_level(pet_type: str) -> int:
 def get_pet_level_bracket(pet_type: str, level: int) -> str:
     """
     Map pet level to its discrete valuation bracket:
-    - Standard pets: 'L1-20', 'L21-80', 'L81-99', 'L100'
-    - 200-cap pets (e.g. Golden Dragon): 'L1-20', 'L21-80', 'L81-99', 'L100', 'L101-199', 'L200'
+    - Standard pets: 'L1', 'L2-20', 'L21-80', 'L81-99', 'L100'
+    - 200-cap pets (e.g. Golden Dragon): 'L1', 'L2-20', 'L21-80', 'L81-99', 'L100', 'L101-199', 'L200'
+    Level 1, level 100 and max level (200 where applicable) are their own brackets; never compare across brackets.
     """
     max_lvl = get_pet_max_level(pet_type)
+    if level <= 1:
+        return "L1"
     if level <= 20:
-        return "L1-20"
+        return "L2-20"
     if level <= 80:
         return "L21-80"
     if level <= 99:

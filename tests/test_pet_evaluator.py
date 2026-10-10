@@ -112,7 +112,7 @@ def record_test_sold_comps(
         )
         effective_internal_id = f"PET_{pet_type}_{decoded['effective_tier']}"
         db.record_sale(
-            uuid=f"comp-sale-{i}-{p}",
+            uuid=f"comp-sale-{tier}-{level}-{i}-{p}",
             internal_id=effective_internal_id,
             price=p,
             buyer_uuid=f"buyer-{i}",
@@ -279,7 +279,9 @@ def test_pet_flip_rejected_when_comps_below_threshold(test_db):
 
     flip = evaluator.evaluate_listing(cand[0], cand[1])
     assert flip is None
-    assert evaluator.get_last_pet_rejection_reason("cand-low-comps") == "LOW_COMPS"
+    # Recomputed for Phase 2c: rejection reason updated from LOW_COMPS to pet_sales_gate
+    assert evaluator.get_last_pet_rejection_reason("cand-low-comps") in ("pet_sales_gate", "LOW_COMPS")
+    assert evaluator.get_last_pet_rejection_reason("cand-low-comps") == "pet_sales_gate"
 
 
 # ============================================================================
@@ -304,7 +306,9 @@ def test_low_level_pet_isolated_from_higher_xp_listings(test_db):
 
     flip = evaluator.evaluate_listing(cand_l1[0], cand_l1[1])
     assert flip is None
-    assert evaluator.get_last_pet_rejection_reason("cand-l1") in ("BUCKET_NO_MATCH", "LOW_COMPS")
+    # Recomputed for Phase 2d: zero comps in bucket rejects with pet_no_comps
+    assert evaluator.get_last_pet_rejection_reason("cand-l1") in ("pet_no_comps", "BUCKET_NO_MATCH", "LOW_COMPS")
+    assert evaluator.get_last_pet_rejection_reason("cand-l1") == "pet_no_comps"
 
 
 # ============================================================================
@@ -313,12 +317,14 @@ def test_low_level_pet_isolated_from_higher_xp_listings(test_db):
 def test_pet_level_bracket_boundary_mappings():
     """
     Validate data-driven bracket boundaries:
-    - L1-20 vs L21-80 (20 vs 21)
+    - Phase 2b: L1 is discrete, L2-20 vs L21-80 (20 vs 21)
     - L21-80 vs L81-99 (80 vs 81)
     - L81-99 vs L100 (99 vs 100)
     - Golden Dragon 200-cap: L150 (L101-199) and L200 (L200)
     """
-    assert get_pet_level_bracket("GOBLIN", 20) == "L1-20"
+    # Recomputed for Phase 2b: L1 is its own bracket, L2-20 covers level 2 to 20
+    assert get_pet_level_bracket("GOBLIN", 1) == "L1"
+    assert get_pet_level_bracket("GOBLIN", 20) == "L2-20"
     assert get_pet_level_bracket("GOBLIN", 21) == "L21-80"
 
     assert get_pet_level_bracket("GOBLIN", 80) == "L21-80"
@@ -329,7 +335,8 @@ def test_pet_level_bracket_boundary_mappings():
 
     # 200-cap pet (Golden Dragon)
     assert get_pet_max_level("GOLDEN_DRAGON") == 200
-    assert get_pet_level_bracket("GOLDEN_DRAGON", 20) == "L1-20"
+    assert get_pet_level_bracket("GOLDEN_DRAGON", 1) == "L1"
+    assert get_pet_level_bracket("GOLDEN_DRAGON", 20) == "L2-20"
     assert get_pet_level_bracket("GOLDEN_DRAGON", 80) == "L21-80"
     assert get_pet_level_bracket("GOLDEN_DRAGON", 99) == "L81-99"
     assert get_pet_level_bracket("GOLDEN_DRAGON", 100) == "L100"
@@ -470,3 +477,200 @@ def test_margin_above_review_cap_yields_low_confidence(test_db):
     assert flip.margin_pct > 40.0
     assert flip.confidence_label == "LOW"
     assert evaluator.get_last_pet_rejection_reason("margin-cand") == "MARGIN_REVIEW"
+
+
+# ============================================================================
+# Phase 2e: Pytest Regressions
+# ============================================================================
+
+def test_regression_goblin_12_listings_no_comps(test_db):
+    """
+    Phase 2e (i):
+    12 identical Lvl 1 PET_GOBLIN_LEGENDARY listings at 4,999,999,
+    model target 9,200,000, no comps -> 0 alerts.
+    """
+    settings = Settings(ENABLE_PET_BUCKET_VALUATION=True)
+    evaluator = FlipEvaluator(settings, db=test_db)
+
+    batch = [
+        make_pet_fixture(f"goblin-{i}", 4_999_999, seller=f"seller-{i}", pet_type="GOBLIN", tier="LEGENDARY", level=1)
+        for i in range(12)
+    ]
+    evaluator.update_cache(batch)
+
+    alerts = []
+    for auction, decoded in batch:
+        flip = evaluator.evaluate_listing(auction, decoded)
+        if flip:
+            alerts.append(flip)
+    assert len(alerts) == 0
+
+
+def test_regression_goblin_12_listings_tight_comps(test_db):
+    """
+    Phase 2e (ii):
+    12 identical Lvl 1 PET_GOBLIN_LEGENDARY listings at 4,999,999,
+    with tight comps around 5,000,000 -> 0 alerts.
+    """
+    record_test_sold_comps(
+        test_db,
+        prices=[4_950_000, 5_000_000, 5_000_000, 5_050_000],
+        pet_type="GOBLIN",
+        tier="LEGENDARY",
+        level=1,
+    )
+    settings = Settings(ENABLE_PET_BUCKET_VALUATION=True)
+    evaluator = FlipEvaluator(settings, db=test_db)
+
+    batch = [
+        make_pet_fixture(f"goblin-{i}", 4_999_999, seller=f"seller-{i}", pet_type="GOBLIN", tier="LEGENDARY", level=1)
+        for i in range(12)
+    ]
+    evaluator.update_cache(batch)
+
+    alerts = []
+    for auction, decoded in batch:
+        flip = evaluator.evaluate_listing(auction, decoded)
+        if flip:
+            alerts.append(flip)
+    assert len(alerts) == 0
+
+
+def test_regression_goblin_12_listings_plus_older_listing(test_db):
+    """
+    Phase 2e (iii):
+    The 12 listings at 4,999,999 plus an older one at 9,200,000 -> 0 alerts.
+    """
+    record_test_sold_comps(
+        test_db,
+        prices=[4_950_000, 5_000_000, 5_000_000, 5_050_000],
+        pet_type="GOBLIN",
+        tier="LEGENDARY",
+        level=1,
+    )
+    settings = Settings(ENABLE_PET_BUCKET_VALUATION=True)
+    evaluator = FlipEvaluator(settings, db=test_db)
+
+    old_start = (time.time() - 3600) * 1000.0
+    batch = [
+        make_pet_fixture(f"goblin-{i}", 4_999_999, seller=f"seller-{i}", pet_type="GOBLIN", tier="LEGENDARY", level=1)
+        for i in range(12)
+    ]
+    batch.append(
+        make_pet_fixture("goblin-old", 9_200_000, seller="seller-old", pet_type="GOBLIN", tier="LEGENDARY", level=1, start_ms=old_start)
+    )
+    evaluator.update_cache(batch)
+
+    alerts = []
+    for auction, decoded in batch:
+        flip = evaluator.evaluate_listing(auction, decoded)
+        if flip:
+            alerts.append(flip)
+    assert len(alerts) == 0
+
+
+def test_regression_goblin_3m_listing_with_tight_comps(test_db):
+    """
+    Phase 2e (iv):
+    One listing at 3,000,000 with tight comps around 5,000,000 and the gate met ->
+    exactly 1 alert (profit stays above default thresholds with Derpy on or off).
+    """
+    record_test_sold_comps(
+        test_db,
+        prices=[4_950_000, 5_000_000, 5_000_000, 5_050_000],
+        pet_type="GOBLIN",
+        tier="LEGENDARY",
+        level=1,
+    )
+
+    for derpy in (False, True):
+        settings = Settings(
+            ENABLE_PET_BUCKET_VALUATION=True,
+            MIN_PROFIT_COINS=500_000,
+            MIN_PROFIT_MARGIN_PCT=10.0,
+            MAYOR_OVERRIDE="DERPY" if derpy else "NONE",
+        )
+        evaluator = FlipEvaluator(settings, db=test_db)
+        evaluator.derpy_active = derpy
+
+        cand = make_pet_fixture("cand-3m", 3_000_000, seller="sellerA", pet_type="GOBLIN", tier="LEGENDARY", level=1)
+        other_ref = make_pet_fixture("other-5.2m", 5_200_000, seller="sellerB", pet_type="GOBLIN", tier="LEGENDARY", level=1)
+
+        evaluator.update_cache([cand, other_ref])
+
+        flip = evaluator.evaluate_listing(cand[0], cand[1])
+        assert flip is not None, f"Failed to alert with derpy={derpy}"
+        assert flip.auction_uuid == "cand-3m"
+        assert flip.target_resell_price == 5_000_000  # min(5.2M, comps median 5.0M)
+        assert flip.net_profit >= 500_000
+        assert flip.margin_pct >= 10.0
+
+
+def test_regression_lvl1_never_compared_with_lvl100(test_db):
+    """
+    Phase 2e (v):
+    Lvl 1 is never compared with the Lvl 100 bucket.
+    """
+    # Record comps strictly for Lvl 100
+    record_test_sold_comps(
+        test_db,
+        prices=[25_000_000, 26_000_000, 25_500_000, 26_500_000],
+        pet_type="GOBLIN",
+        tier="LEGENDARY",
+        level=100,
+    )
+    settings = Settings(ENABLE_PET_BUCKET_VALUATION=True)
+    evaluator = FlipEvaluator(settings, db=test_db)
+
+    cand_l1 = make_pet_fixture("cand-l1", 5_000_000, pet_type="GOBLIN", tier="LEGENDARY", level=1)
+    other_l100 = make_pet_fixture("other-l100", 25_000_000, pet_type="GOBLIN", tier="LEGENDARY", level=100)
+
+    evaluator.update_cache([cand_l1, other_l100])
+
+    flip = evaluator.evaluate_listing(cand_l1[0], cand_l1[1])
+    assert flip is None
+    assert evaluator.get_last_pet_rejection_reason("cand-l1") == "pet_no_comps"
+
+
+def test_regression_gate_varies_by_rarity(test_db):
+    """
+    Phase 2e (vi):
+    The sales gate varies by rarity:
+    EPIC (gate=4) with 3 comps -> rejected with pet_sales_gate.
+    LEGENDARY (gate=3) with 3 comps -> passes sales gate.
+    """
+    # 3 comps for EPIC
+    record_test_sold_comps(
+        test_db,
+        prices=[5_000_000, 5_000_000, 5_000_000],
+        pet_type="GOBLIN",
+        tier="EPIC",
+        level=1,
+    )
+    # 3 comps for LEGENDARY
+    record_test_sold_comps(
+        test_db,
+        prices=[5_000_000, 5_000_000, 5_000_000],
+        pet_type="GOBLIN",
+        tier="LEGENDARY",
+        level=1,
+    )
+
+    settings = Settings(ENABLE_PET_BUCKET_VALUATION=True)
+    evaluator = FlipEvaluator(settings, db=test_db)
+
+    cand_epic = make_pet_fixture("epic-cand", 3_000_000, pet_type="GOBLIN", tier="EPIC", level=1)
+    ref_epic = make_pet_fixture("epic-ref", 5_000_000, pet_type="GOBLIN", tier="EPIC", level=1)
+    evaluator.update_cache([cand_epic, ref_epic])
+
+    flip_epic = evaluator.evaluate_listing(cand_epic[0], cand_epic[1])
+    assert flip_epic is None
+    assert evaluator.get_last_pet_rejection_reason("epic-cand") == "pet_sales_gate"
+
+    cand_leg = make_pet_fixture("leg-cand", 3_000_000, pet_type="GOBLIN", tier="LEGENDARY", level=1)
+    ref_leg = make_pet_fixture("leg-ref", 5_200_000, pet_type="GOBLIN", tier="LEGENDARY", level=1)
+    evaluator.update_cache([cand_leg, ref_leg])
+
+    flip_leg = evaluator.evaluate_listing(cand_leg[0], cand_leg[1])
+    assert flip_leg is not None
+    assert flip_leg.auction_uuid == "leg-cand"

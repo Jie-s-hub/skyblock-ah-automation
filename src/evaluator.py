@@ -1411,14 +1411,8 @@ class FlipEvaluator:
         # Fetch active listings in candidate's bucket
         bucket_listings = list(self._pet_buckets.get(bucket_key, []))
 
-        # Candidate excludes itself
+        # Candidate excludes itself strictly by uuid, never by price
         other_listings = [l for l in bucket_listings if l.get("uuid") != uuid]
-        if len(other_listings) == len(bucket_listings) and bucket_listings:
-            # If UUID was not recorded in bucket, attempt self-exclusion by price
-            for i, l in enumerate(bucket_listings):
-                if l.get("price") == buy_price:
-                    other_listings = bucket_listings[:i] + bucket_listings[i + 1:]
-                    break
 
         # Filter other listings by XP window (+/- 25%)
         xp_window_pct = getattr(self.config, "PET_XP_WINDOW_PCT", 25.0)
@@ -1516,22 +1510,30 @@ class FlipEvaluator:
             if s_bucket == bucket_key:
                 matching_sales.append(s)
 
-        min_comps = getattr(self.config, "PET_MIN_SOLD_COMPS_48H", 5)
-
-        # If no active listing matched and insufficient comps -> BUCKET_NO_MATCH
-        if ref_listing is None and len(matching_sales) < min_comps:
-            self.last_pet_rejections[uuid] = "BUCKET_NO_MATCH"
-            logger.info("Rejected pet flip [%s]: reason=BUCKET_NO_MATCH", uuid)
+        # Phase 2c & 2d: Per-rarity sales gate & comps capping
+        if not matching_sales:
+            self.last_pet_rejections[uuid] = "pet_no_comps"
+            logger.info("Rejected pet flip [%s]: reason=pet_no_comps (no same-bucket comps in 48h)", uuid)
             return None
 
-        # If active reference listing existed, but sold comps < min_comps -> LOW_COMPS
+        rarity_gate_map = getattr(self.config, "PET_MIN_SALES_BY_RARITY", None) or {
+            "COMMON": 8,
+            "UNCOMMON": 8,
+            "RARE": 6,
+            "EPIC": 4,
+            "LEGENDARY": 3,
+            "MYTHIC": 3,
+        }
+        min_comps = rarity_gate_map.get(effective_tier) or rarity_gate_map.get(pet_tier) or getattr(self.config, "PET_MIN_SOLD_COMPS_48H", 3)
+
         if len(matching_sales) < min_comps:
-            self.last_pet_rejections[uuid] = "LOW_COMPS"
+            self.last_pet_rejections[uuid] = "pet_sales_gate"
             logger.info(
-                "Rejected pet flip [%s]: reason=LOW_COMPS (found %d, required %d)",
+                "Rejected pet flip [%s]: reason=pet_sales_gate (found %d, required %d for %s)",
                 uuid,
                 len(matching_sales),
                 min_comps,
+                effective_tier,
             )
             return None
 
@@ -1551,25 +1553,27 @@ class FlipEvaluator:
                 try:
                     ref_age_hours = (current_now_ms - float(ref_start)) / (1000.0 * 3600.0)
                     if ref_age_hours > max_age_hours:
-                        if ref_price > comp_p75 * 1.05:
+                        if ref_price > comp_median * 1.05:
                             self.last_pet_rejections[uuid] = "GHOST_REFERENCE"
                             logger.info(
-                                "Rejected pet flip [%s]: reason=GHOST_REFERENCE (stale ref %d > comp_p75 %d)",
+                                "Rejected pet flip [%s]: reason=GHOST_REFERENCE (stale ref %d > comp_median %d)",
                                 uuid,
                                 ref_price,
-                                comp_p75,
+                                comp_median,
                             )
                             return None
                 except (ValueError, TypeError):
                     pass
 
-        # Target resell price calculation: min(ref_price, comp_p75)
+        # Target resell price calculation:
+        # Phase 2d: min(model target, same-bucket sold-comps value)
+        # Model target comes from lowest valid other active listing (ref_price), else comp_median
         if ref_price is not None:
-            target_resell = min(ref_price, comp_p75)
-            baseline_source = "BUCKET_REF_AND_COMPS_P75"
+            model_target = ref_price
+            baseline_source = "BUCKET_REF_AND_COMPS_MEDIAN"
         else:
-            target_resell = comp_p75
-            baseline_source = "COMPS_P75"
+            model_target = comp_median
+            baseline_source = "COMPS_MEDIAN"
 
         # Pet candy penalty if applicable
         if pet_candy_used > 0:
@@ -1579,7 +1583,7 @@ class FlipEvaluator:
                 pet_candy_used,
                 getattr(self.config, "PET_CANDY_PENALTY_PER_CANDY", 0.015),
             )
-            target_resell = int(round(target_resell * (1.0 - penalty_pct)))
+            model_target = int(round(model_target * (1.0 - penalty_pct)))
 
         # Craft cost ceiling reuse if present
         craft_cost = None
@@ -1593,9 +1597,13 @@ class FlipEvaluator:
                 if buy_price >= buy_thresh:
                     return None
                 ceiling = int(craft_cost * getattr(self.config, "CRAFT_CEILING_RATIO", 1.05))
-                if target_resell > ceiling:
-                    target_resell = ceiling
+                if model_target > ceiling:
+                    model_target = ceiling
                     is_craft_capped = True
+
+        # Phase 2d: Resale target = min(model target, same-bucket sold-comps value)
+        # Model may only lower the target, never raise it above what recent sales support.
+        target_resell = min(model_target, comp_median)
 
         if target_resell <= buy_price:
             return None

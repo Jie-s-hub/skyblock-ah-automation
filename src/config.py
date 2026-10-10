@@ -335,6 +335,17 @@ class Settings(BaseSettings):
         default=5,
         description="Minimum confirmed sold comps in 48h required to alert on a pet flip (default: 5)",
     )
+    PET_MIN_SALES_BY_RARITY: dict[str, int] = Field(
+        default_factory=lambda: {
+            "COMMON": 8,
+            "UNCOMMON": 8,
+            "RARE": 6,
+            "EPIC": 4,
+            "LEGENDARY": 3,
+            "MYTHIC": 3,
+        },
+        description="Minimum same-bucket sales in the last 48h required for a pet alert by rarity",
+    )
     PET_COMPS_WINDOW_HOURS: float = Field(
         default=48.0,
         description="Rolling lookback window in hours for pet sold comps (default: 48.0)",
