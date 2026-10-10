@@ -84,6 +84,7 @@ class PipelineTelemetry:
             lambda: deque(maxlen=self.max_history_per_stage)
         )
         self._stage_run_counts: dict[str, int] = defaultdict(int)
+        self._rejection_counts: dict[str, int] = defaultdict(int)
 
     def record_stage_latency(self, stage: str, latency_ms: float) -> None:
         """Record execution latency in milliseconds for a specific pipeline stage."""
@@ -103,6 +104,15 @@ class PipelineTelemetry:
     def record_error(self, count: int = 1) -> None:
         """Record runtime errors encountered in the pipeline."""
         self.error_count += count
+
+    def record_rejection(self, reason: str, count: int = 1) -> None:
+        """Record an evaluation rejection reason count."""
+        if reason:
+            self._rejection_counts[reason] += count
+
+    def get_top_rejections(self, limit: int = 5) -> list[tuple[str, int]]:
+        """Return the top rejection reasons sorted by occurrence count descending."""
+        return sorted(self._rejection_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
 
     def get_average_latency(self, stage: str) -> float:
         """Compute the average latency (in ms) from recent history for a stage."""
@@ -128,6 +138,7 @@ class PipelineTelemetry:
             "error_count": self.error_count,
             "average_latencies_ms": avg_latencies,
             "stage_runs": dict(self._stage_run_counts),
+            "top_rejections": self.get_top_rejections(limit=5),
         }
 
     def reset(self) -> None:
@@ -138,6 +149,7 @@ class PipelineTelemetry:
         self.error_count = 0
         self._stage_latencies.clear()
         self._stage_run_counts.clear()
+        self._rejection_counts.clear()
 
 
 class StageTimer:
@@ -227,6 +239,15 @@ def build_health_embed(telemetry: Optional[PipelineTelemetry] = None) -> dict[st
         {"name": "⚠️ Errors", "value": f"`{metrics['error_count']:,}`", "inline": True},
         {"name": "⚡ Stage Latencies (Avg)", "value": latency_display, "inline": False},
     ]
+
+    top_rejections = metrics.get("top_rejections") or []
+    if top_rejections:
+        rejections_display = "\n".join(
+            [f"• `{reason}`: **{count:,}**" for reason, count in top_rejections]
+        )
+        fields.append(
+            {"name": "🚫 Top Rejections", "value": rejections_display, "inline": False}
+        )
 
     return {
         "title": "🟢 Hypixel AH Monitor — Health Heartbeat",

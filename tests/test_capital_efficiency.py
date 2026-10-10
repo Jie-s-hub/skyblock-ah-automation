@@ -70,6 +70,8 @@ def test_compute_confidence_score_high_tier1_comps():
         daily_velocity=25.0,
         valuation_path="COMPS_TIER_1",
         is_priority=True,
+        # Under Phase 3 honest confidence rules, HIGH requires score >= 75 AND comp_count >= 5 (MIN_COMPS_FOR_HIGH)
+        comp_count=5,
     )
     # Path: 40 pts
     # Liq: 30 pts (vel >= 20 is 30, priority capped at 30)

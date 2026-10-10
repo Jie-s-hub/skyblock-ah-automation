@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     last_checked INTEGER DEFAULT 0,
     last_checked_timestamp INTEGER DEFAULT 0,
     derpy_active INTEGER DEFAULT 0,
-    fee_model_version INTEGER DEFAULT 2
+    fee_model_version INTEGER DEFAULT 2,
+    trace_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_item_time ON alerts(internal_id, timestamp);
 
@@ -170,6 +171,14 @@ class DatabaseManager:
                         except sqlite3.OperationalError:
                             pass
                 conn.execute("PRAGMA user_version = 2;")
+
+            # Phase 3 Migration: Add trace_json column to alerts table
+            if curr_version < 3:
+                try:
+                    conn.execute("ALTER TABLE alerts ADD COLUMN trace_json TEXT;")
+                except sqlite3.OperationalError:
+                    pass
+                conn.execute("PRAGMA user_version = 3;")
         logger.debug("Database initialized with WAL mode at: %s", self.db_path)
 
     def close(self) -> None:
@@ -199,6 +208,7 @@ class DatabaseManager:
         net_profit: Optional[int] = None,
         derpy_active: int = 0,
         fee_model_version: int = 2,
+        trace_json: Optional[str | dict[str, Any]] = None,
     ) -> bool:
         """Insert or ignore an arbitrage alert."""
         conn = self._get_connection()
@@ -214,14 +224,20 @@ class DatabaseManager:
             if isinstance(features_json, str)
             else json.dumps(features_json or {}, separators=(",", ":"))
         )
+        trace_str = (
+            trace_json
+            if isinstance(trace_json, str)
+            else json.dumps(trace_json, separators=(",", ":")) if trace_json is not None
+            else None
+        )
 
         query = """
         INSERT OR IGNORE INTO alerts (
             auction_uuid, timestamp, internal_id, buy_price,
             estimated_resell, projected_profit, margin_pct,
             confidence_label, valuation_path, features_json,
-            derpy_active, fee_model_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            derpy_active, fee_model_version, trace_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         try:
             with conn:
@@ -240,6 +256,7 @@ class DatabaseManager:
                         feat_str,
                         int(derpy_active),
                         int(fee_model_version),
+                        trace_str,
                     ),
                 )
                 return cur.rowcount > 0
@@ -251,12 +268,23 @@ class DatabaseManager:
         """Async wrapper for log_alert."""
         return await asyncio.to_thread(self.log_alert, **kwargs)
 
-    def get_alert(self, auction_uuid: str) -> Optional[dict[str, Any]]:
-        """Retrieve alert by auction UUID."""
+    def get_alert(self, identifier: str | int) -> Optional[dict[str, Any]]:
+        """Retrieve alert by auction UUID or integer ID."""
         conn = self._get_connection()
-        cur = conn.execute("SELECT * FROM alerts WHERE auction_uuid = ?", (auction_uuid,))
+        cur = conn.execute("SELECT * FROM alerts WHERE auction_uuid = ? OR id = ?", (str(identifier), str(identifier)))
         row = cur.fetchone()
         return dict(row) if row else None
+
+    def get_total_sales_count(self) -> int:
+        """Return total number of recorded sales in sales_history."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("SELECT COUNT(*) FROM sales_history;")
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+        except Exception as err:
+            logger.debug("Failed to count sales_history: %s", err)
+            return 0
 
     def get_alerts(
         self,

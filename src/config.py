@@ -1,5 +1,5 @@
-from typing import Optional
-from pydantic import Field, model_validator
+from typing import Any, Optional
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -226,7 +226,7 @@ class Settings(BaseSettings):
 
     # Sold-Comps Valuation Engine (Phase 3)
     ENABLE_SOLD_COMPS: bool = Field(
-        default=False,
+        default=True,
         description="Enable Phase 3 historical comparable-sales valuation engine",
     )
     MIN_COMPS_THRESHOLD: int = Field(
@@ -245,10 +245,31 @@ class Settings(BaseSettings):
         default=0.25,
         description="Maximum allowed divergence (25%) before comps valuation falls back to conservative Path B baseline",
     )
+    MIN_COMPS_FOR_HIGH: int = Field(
+        default=5,
+        description="Minimum same-bucket sales in the comps window required for HIGH confidence (default: 5)",
+    )
+    SHADOW_MODE_LANES: list[str] = Field(
+        default_factory=list,
+        description="Lanes that are evaluated and persisted but never alerted (comma-separated or list)",
+    )
+    COLD_START_MIN_SALES: int = Field(
+        default=50,
+        description="Minimum total recorded completed sales before exiting cold start / warm-up state",
+    )
+
+    @field_validator("SHADOW_MODE_LANES", mode="before")
+    @classmethod
+    def _parse_shadow_mode_lanes(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [lane.strip() for lane in v.split(",") if lane.strip()]
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        return []
 
     # Empirical Bayes Retention Fitting (Phase 4)
     ENABLE_DYNAMIC_RETENTION: bool = Field(
-        default=False,
+        default=True,
         description="Enable Phase 4 empirical Bayes data-fitted retention rates for upgraded items",
     )
     RETENTION_SHRINKAGE_TAU: float = Field(
@@ -280,7 +301,7 @@ class Settings(BaseSettings):
 
     # Anti-Domination & Bazaar Shock Guard (Phase 6)
     ENABLE_BAZAAR_SHOCK_GUARD: bool = Field(
-        default=False,
+        default=True,
         description="Enable Bazaar price shock detection (>15% deviation from rolling median)",
     )
     BAZAAR_SHOCK_THRESHOLD_PCT: float = Field(
@@ -296,7 +317,7 @@ class Settings(BaseSettings):
         description="Time window in seconds (5 minutes) for rolling median calculation",
     )
     ENABLE_SELLER_DOMINATION_GUARD: bool = Field(
-        default=False,
+        default=True,
         description="Enable seller domination guard against market manipulation",
     )
     MAX_SELLER_DOMINATION_RATIO: float = Field(

@@ -226,6 +226,22 @@ async def run_monitor(
     # In-memory tracking of alerted auction UUIDs to prevent duplicate alerts
     alerted_uuids: set[str] = set()
     telemetry = PipelineTelemetry()
+    evaluator.set_telemetry(telemetry)
+
+    # Cold start / warm-up state evaluation & logging (Phase 3)
+    sales_count = db.get_total_sales_count() if db is not None else 0
+    cold_start_thresh = getattr(settings, "COLD_START_MIN_SALES", 50)
+    is_cold_start = sales_count < cold_start_thresh
+    evaluator.set_cold_start(is_cold_start)
+    if is_cold_start:
+        logger.warning(
+            "System in COLD START / WARM-UP state: only %d recorded sales in history (threshold: %d). "
+            "Comps-dependent lanes (pets, vanity) will emit nothing; floor lane capped at MEDIUM.",
+            sales_count,
+            cold_start_thresh,
+        )
+    else:
+        logger.info("Market intelligence warmed up: %d recorded sales in history.", sales_count)
 
     try:
         while not stop_event.is_set():
@@ -338,9 +354,21 @@ async def run_monitor(
                                     valuation_path=flip.valuation_path,
                                     derpy_active=1 if flip.derpy_active else 0,
                                     fee_model_version=flip.fee_model_version,
+                                    trace_json=getattr(flip, "trace_json", None),
                                 )
                             except Exception as err:
                                 logger.warning("Failed to log alert to DB: %s", err)
+
+                        # Phase 3 Shadow Mode: evaluated and persisted, but never alerted
+                        shadow_lanes = getattr(settings, "SHADOW_MODE_LANES", [])
+                        if flip.lane in shadow_lanes:
+                            logger.info(
+                                "Flip [%s] in lane [%s] is in SHADOW_MODE — persisted but alert suppressed",
+                                flip.auction_uuid,
+                                flip.lane,
+                            )
+                            continue
+
                         await notifier.send_alert(flip)
 
             cycle_elapsed_ms = (asyncio.get_running_loop().time() - cycle_start) * 1000.0

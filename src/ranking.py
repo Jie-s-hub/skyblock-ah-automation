@@ -98,6 +98,23 @@ def compute_confidence_score(flip: Any) -> tuple[float, str]:
     else:
         label = "LOW"
 
+    # Phase 3 Honest Confidence:
+    # 1. Path-B-only (networth) valuations cap at MEDIUM
+    if val_path == "PATH_B" and label == "HIGH":
+        label = "MEDIUM"
+
+    # 2. HIGH requires >= MIN_COMPS_FOR_HIGH same-bucket sales in the comps window
+    comp_count = getattr(flip, "comp_count", None) or 0
+    min_comps_high = getattr(flip, "config", None)
+    min_comps_val = 5
+    if hasattr(flip, "min_comps_for_high") and flip.min_comps_for_high is not None:
+        min_comps_val = flip.min_comps_for_high
+    elif min_comps_high and hasattr(min_comps_high, "MIN_COMPS_FOR_HIGH"):
+        min_comps_val = min_comps_high.MIN_COMPS_FOR_HIGH
+
+    if label == "HIGH" and comp_count < min_comps_val:
+        label = "MEDIUM"
+
     return (round(final_score, 1), label)
 
 
@@ -108,6 +125,7 @@ def score_and_rank_flip(flip: Any, config: Optional[Settings] = None) -> Any:
     cfg = config or (getattr(flip, "config", None) if hasattr(flip, "config") else None)
     enable_qd = getattr(cfg, "ENABLE_QUEUE_DEPTH_HOLD_TIME", True) if cfg else True
     min_hold_h = getattr(cfg, "MIN_HOLD_TIME_HOURS", None) if cfg else None
+    min_comps_high = getattr(cfg, "MIN_COMPS_FOR_HIGH", 5) if cfg else 5
 
     hold_hours, ces = calculate_capital_efficiency(
         net_profit=int(getattr(flip, "net_profit", 0)),
@@ -127,7 +145,25 @@ def score_and_rank_flip(flip: Any, config: Optional[Settings] = None) -> Any:
             if conf_label == "LOW":
                 conf_score = min(conf_score, 40.0)
             elif conf_label == "HIGH":
-                conf_score = max(conf_score, 80.0)
+                comp_cnt = getattr(flip, "comp_count", None) or 0
+                if comp_cnt >= min_comps_high:
+                    conf_score = max(conf_score, 80.0)
+                else:
+                    conf_label = "MEDIUM"
+                    conf_score = min(conf_score, 74.9)
+
+    # Phase 3 Honest Confidence Enforcements:
+    # 1. Path-B-only (networth) valuations cap at MEDIUM
+    val_path = str(getattr(flip, "valuation_path", "")).upper()
+    if val_path == "PATH_B" and conf_label == "HIGH":
+        conf_label = "MEDIUM"
+        conf_score = min(conf_score, 74.9)
+
+    # 2. HIGH requires score >= 75 AND >= MIN_COMPS_FOR_HIGH same-bucket sales
+    comp_count = getattr(flip, "comp_count", None) or 0
+    if conf_label == "HIGH" and comp_count < min_comps_high:
+        conf_label = "MEDIUM"
+        conf_score = min(conf_score, 74.9)
 
     flip.estimated_hold_hours = hold_hours
     flip.capital_efficiency = ces

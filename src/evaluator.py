@@ -49,6 +49,15 @@ from src.constants.pet_levels import (
     get_pet_max_level,
     is_pet_xp_in_window,
 )
+from src.constants.lanes import (
+    CANONICAL_LANES,
+    LANE_FLOOR,
+    LANE_GOD_ROLL,
+    LANE_PETS,
+    LANE_SOLD_COMPS,
+    LANE_UPGRADED_NETWORTH,
+    resolve_canonical_lane,
+)
 from src.constants.reforge_stones import REFORGE_STONE_DISPLAY_NAMES, REFORGE_STONE_MAP
 from src.constants.star_costs import get_star_essence_cost
 from src.constants.recipes import get_base_item_id, get_recipe
@@ -140,6 +149,40 @@ class FlipResult(BaseModel):
     suggested_list_price: Optional[int] = None
     derpy_active: bool = False
     fee_model_version: int = 2
+
+    # Phase 3 Canonical Lane & Trace
+    lane: str = LANE_FLOOR
+    decision: Optional[Any] = Field(default=None, repr=False)
+    trace_json: Optional[str] = None
+
+
+class Decision(BaseModel):
+    """
+    Structured evaluation decision tracing accepted/rejected status,
+    canonical lane, path, rejection reasons, and key intermediates.
+    """
+
+    accepted: bool
+    lane: str
+    path: str
+    reasons: list[str] = Field(default_factory=list)
+    intermediates: dict[str, Any] = Field(default_factory=dict)
+    flip: Optional[FlipResult] = Field(default=None, repr=False)
+
+    def __bool__(self) -> bool:
+        return self.accepted
+
+    def to_trace_dict(self) -> dict[str, Any]:
+        return {
+            "accepted": self.accepted,
+            "lane": self.lane,
+            "path": self.path,
+            "reasons": self.reasons,
+            "intermediates": self.intermediates,
+        }
+
+    def to_trace_json(self) -> str:
+        return json.dumps(self.to_trace_dict(), separators=(",", ":"))
 
 
 
@@ -236,6 +279,21 @@ class FlipEvaluator:
         self._pet_dedupe_cache: dict[tuple, float] = {}
         self.derpy_active: bool = bool(getattr(config, "MAYOR_DERPY_ACTIVE", False))
         self.derpy_collection_fee_rate: float = float(getattr(config, "DERPY_COLLECTION_FEE_RATE", 0.04))
+        self.is_cold_start: bool = False
+        self.telemetry: Optional[Any] = None
+        self.last_decision: Optional[Decision] = None
+
+    def set_cold_start(self, is_cold: bool) -> None:
+        """Set whether the market intelligence is in cold-start / warm-up state."""
+        self.is_cold_start = is_cold
+
+    def set_telemetry(self, telemetry: Any) -> None:
+        """Set or update operational telemetry tracker for recording rejection counts."""
+        self.telemetry = telemetry
+
+    def get_last_decision(self) -> Optional[Decision]:
+        """Retrieve the structured decision of the most recently evaluated listing."""
+        return self.last_decision
 
     def set_derpy_active(self, active: bool) -> None:
         """Set whether Mayor Derpy is currently active."""
@@ -1902,6 +1960,15 @@ class FlipEvaluator:
         if flip is None:
             return None
 
+        # Resolve canonical lane
+        flip.lane = resolve_canonical_lane(
+            flip.valuation_path,
+            is_pet=flip.is_pet,
+            is_god_roll=flip.is_god_roll,
+            is_attribute=flip.is_attribute_snipe,
+            is_upgraded=flip.is_networth_snipe,
+        )
+
         from src.constants.taxes import best_resale_net
         best_res = best_resale_net(
             flip.target_resell_price,
@@ -1920,39 +1987,91 @@ class FlipEvaluator:
             min_ces = getattr(self.config, "MIN_CAPITAL_EFFICIENCY", 0.0)
             if min_ces > 0.0 and (flip.capital_efficiency or 0.0) < min_ces:
                 return None
+
+        # Cold start cap for floor lane
+        if self.is_cold_start and flip.lane == LANE_FLOOR:
+            if flip.confidence_label == "HIGH":
+                flip.confidence_label = "MEDIUM"
+                flip.confidence_score = min(flip.confidence_score or 70.0, 74.9)
+
+        # Build Decision trace
+        decision = Decision(
+            accepted=True,
+            lane=flip.lane,
+            path=flip.valuation_path,
+            reasons=[],
+            intermediates={
+                "buy_price": flip.buy_price,
+                "target_resell_price": flip.target_resell_price,
+                "suggested_list_price": flip.suggested_list_price,
+                "net_profit": flip.net_profit,
+                "margin_pct": flip.margin_pct,
+                "confidence_label": flip.confidence_label,
+                "confidence_score": flip.confidence_score,
+                "comp_count": flip.comp_count,
+                "comp_median": flip.comp_median,
+                "capital_efficiency": flip.capital_efficiency,
+                "estimated_hold_hours": flip.estimated_hold_hours,
+                "craft_cost": flip.craft_cost,
+                "is_craft_capped": flip.is_craft_capped,
+                "queue_depth": flip.queue_depth,
+                "derpy_active": flip.derpy_active,
+                "fee_model_version": flip.fee_model_version,
+            },
+            flip=flip,
+        )
+        flip.decision = decision
+        flip.trace_json = decision.to_trace_json()
+        self.last_decision = decision
         return flip
 
-    def evaluate_listing(
+    def evaluate_decision(
         self,
         auction: dict[str, Any],
         decoded_data: dict[str, Any],
         now_ms: Optional[float] = None,
-    ) -> Optional[FlipResult]:
+    ) -> Decision:
         """
-        Evaluate a single BIN auction listing against market price baselines.
-        Routes to:
-        - Pet Valuation Engine for Pets
-        - Attribute Valuation Engine for Crimson Isle God Rolls
-        - Historical Sold-Comps Engine when enabled and sufficient data exists
-        - Path B (Networth Engine) for upgraded items
-        - Path A (2nd Lowest BIN) for clean items
+        Evaluate a single BIN auction listing and return a structured Decision
+        tracing accepted/rejected status, lane, path, rejection reasons, and key intermediates.
         """
+        uuid = str(auction.get("uuid", ""))
+        buy_price = int(auction.get("starting_bid", 0))
         internal_id = decoded_data.get("internal_id")
+        intermediates: dict[str, Any] = {
+            "uuid": uuid,
+            "buy_price": buy_price,
+            "internal_id": internal_id,
+        }
+
+        def _reject(reason: str, lane: str = LANE_FLOOR, path: str = "UNKNOWN") -> Decision:
+            dec = Decision(
+                accepted=False,
+                lane=lane,
+                path=path,
+                reasons=[reason],
+                intermediates=intermediates,
+                flip=None,
+            )
+            self.last_decision = dec
+            if self.telemetry is not None and hasattr(self.telemetry, "record_rejection"):
+                self.telemetry.record_rejection(reason)
+            return dec
+
         if not internal_id or internal_id == "UNKNOWN":
-            return None
+            return _reject("unknown_internal_id")
 
         # Stage 0: Universal Blacklist Gate (Cosmetic, Dye, Vanity, Illiquid Bait)
         item_name = decoded_data.get("item_name") or auction.get("item_name", "")
         if self.is_blacklisted(internal_id, item_name):
-            return None
+            return _reject("blacklisted")
 
         # Stage 1: Sales Velocity & Volume Validation check (R2)
         if self.config.ENABLE_VELOCITY_FILTER and self.velocity_tracker is not None:
             if not self.velocity_tracker.is_velocity_sufficient(internal_id):
-                return None
+                return _reject("insufficient_velocity")
 
         # Stage 1.5: Early Craft Cost Ceiling Gate (Clean craftable bait rejection)
-        buy_price = int(auction.get("starting_bid", 0))
         is_upgraded = self.is_upgraded_item(decoded_data)
         if (
             not is_upgraded
@@ -1962,23 +2081,38 @@ class FlipEvaluator:
             and self.bazaar_cache is not None
         ):
             craft_cost = calculate_craft_cost(internal_id, self.bazaar_cache, ah_cache=self)
-            if craft_cost is not None and buy_price >= (craft_cost * getattr(self.config, "CRAFT_BUY_THRESHOLD_RATIO", 0.95)):
-                return None
+            if craft_cost is not None:
+                intermediates["craft_cost"] = craft_cost
+                if buy_price >= (craft_cost * getattr(self.config, "CRAFT_BUY_THRESHOLD_RATIO", 0.95)):
+                    return _reject("craft_ceiling", lane=LANE_FLOOR, path="CRAFT_CEILING")
 
         sorted_prices = self._price_cache.get(internal_id, [])
 
         # Stage 2: Specialized Evaluation Paths (Pets and Attribute God Rolls)
         if decoded_data.get("is_pet"):
+            if self.is_cold_start:
+                self.last_pet_rejections[uuid] = "cold_start"
+                return _reject("cold_start", lane=LANE_PETS, path="PET_BUCKET")
+
             pet_flip = self._evaluate_pet_listing(auction, decoded_data, sorted_prices, now_ms=now_ms)
             if pet_flip is not None:
-                return self._finalize_flip(pet_flip)
+                fin = self._finalize_flip(pet_flip)
+                if fin is not None:
+                    return self.last_decision or Decision(accepted=True, lane=LANE_PETS, path="PET_BUCKET", flip=fin)
+                return _reject("pet_capital_efficiency", lane=LANE_PETS, path="PET_BUCKET")
             if getattr(self.config, "ENABLE_PET_BUCKET_VALUATION", True):
-                return None
+                pet_rej = self.last_pet_rejections.get(uuid, "pet_rejected")
+                return _reject(pet_rej, lane=LANE_PETS, path="PET_BUCKET")
+            # When ENABLE_PET_BUCKET_VALUATION is False, fall through to clean floor logic
 
         if decoded_data.get("attributes"):
             attr_flip = self._evaluate_attribute_listing(auction, decoded_data, sorted_prices)
             if attr_flip is not None:
-                return self._finalize_flip(attr_flip)
+                fin = self._finalize_flip(attr_flip)
+                if fin is not None:
+                    return self.last_decision or Decision(accepted=True, lane=LANE_GOD_ROLL, path="ATTRIBUTE", flip=fin)
+                return _reject("attribute_capital_efficiency", lane=LANE_GOD_ROLL, path="ATTRIBUTE")
+            return _reject("attribute_rejected", lane=LANE_GOD_ROLL, path="ATTRIBUTE")
 
         # Stage 2.5: Historical Comparable-Sales Engine (Phase 3)
         if getattr(self.config, "ENABLE_SOLD_COMPS", False) and self.comps_evaluator is not None:
@@ -1986,22 +2120,50 @@ class FlipEvaluator:
                 auction, decoded_data, sorted_prices, now_ms=now_ms
             )
             if comps_found:
-                return self._finalize_flip(comps_flip)
+                if comps_flip is not None:
+                    fin = self._finalize_flip(comps_flip)
+                    if fin is not None:
+                        return self.last_decision or Decision(accepted=True, lane=LANE_SOLD_COMPS, path=comps_flip.valuation_path, flip=fin)
+                    return _reject("comps_capital_efficiency", lane=LANE_SOLD_COMPS, path=comps_flip.valuation_path)
+                return _reject("comps_unprofitable", lane=LANE_SOLD_COMPS, path="SOLD_COMPS")
 
         # Sample size gate for standard market listings
         if len(sorted_prices) < self.config.MIN_SAMPLE_SIZE:
-            return None
-
-        is_upgraded = self.is_upgraded_item(decoded_data)
+            return _reject("insufficient_sample_size", lane=LANE_FLOOR, path="SAMPLE_SIZE")
 
         # Path B: Upgraded Flip (Networth Engine)
         if is_upgraded and self.config.ENABLE_NETWORTH_VALUATION and self.bazaar_cache is not None:
             networth_flip = self._evaluate_upgraded_listing(auction, decoded_data, sorted_prices)
             if networth_flip is not None:
-                return self._finalize_flip(networth_flip)
+                fin = self._finalize_flip(networth_flip)
+                if fin is not None:
+                    return self.last_decision or Decision(accepted=True, lane=LANE_UPGRADED_NETWORTH, path="PATH_B", flip=fin)
+                return _reject("networth_capital_efficiency", lane=LANE_UPGRADED_NETWORTH, path="PATH_B")
+            return _reject("networth_unprofitable", lane=LANE_UPGRADED_NETWORTH, path="PATH_B")
 
         # Path A: Clean / Non-Addon Flip (Current Preserved Logic)
         if not is_upgraded or not self.config.ENABLE_NETWORTH_VALUATION or self.bazaar_cache is None:
-            return self._finalize_flip(self._evaluate_clean_listing(auction, decoded_data, sorted_prices))
+            clean_flip = self._evaluate_clean_listing(auction, decoded_data, sorted_prices)
+            if clean_flip is not None:
+                fin = self._finalize_flip(clean_flip)
+                if fin is not None:
+                    return self.last_decision or Decision(accepted=True, lane=LANE_FLOOR, path="PATH_A", flip=fin)
+                return _reject("floor_capital_efficiency", lane=LANE_FLOOR, path="PATH_A")
+            return _reject("floor_unprofitable", lane=LANE_FLOOR, path="PATH_A")
 
-        return None
+        return _reject("no_matching_path")
+
+    def evaluate_listing(
+        self,
+        auction: dict[str, Any],
+        decoded_data: dict[str, Any],
+        now_ms: Optional[float] = None,
+    ) -> Optional[FlipResult]:
+        """
+        Evaluate a single BIN auction listing against market price baselines.
+        Calls evaluate_decision and returns the accepted FlipResult, or None.
+        """
+        decision = self.evaluate_decision(auction, decoded_data, now_ms=now_ms)
+        return decision.flip if decision.accepted else None
+
+    evaluate = evaluate_decision

@@ -93,6 +93,7 @@ def record_test_sold_comps(
     skin: Optional[str] = None,
     held_item: str = "",
     age_hours_list: Optional[list[float]] = None,
+    uuid_prefix: str = "",
 ) -> None:
     """Populate database sales_history with comparable pet sales."""
     now_ms = int(time.time() * 1000)
@@ -100,7 +101,7 @@ def record_test_sold_comps(
         age_h = age_hours_list[i] if age_hours_list and i < len(age_hours_list) else 2.0
         ts = int(now_ms - age_h * 3600.0 * 1000.0)
         _, decoded = make_pet_fixture(
-            uuid=f"comp-{i}",
+            uuid=f"{uuid_prefix}comp-{i}",
             price=p,
             pet_type=pet_type,
             tier=tier,
@@ -112,7 +113,7 @@ def record_test_sold_comps(
         )
         effective_internal_id = f"PET_{pet_type}_{decoded['effective_tier']}"
         db.record_sale(
-            uuid=f"comp-sale-{tier}-{level}-{i}-{p}",
+            uuid=f"{uuid_prefix}comp-sale-{tier}-{level}-{i}-{p}",
             internal_id=effective_internal_id,
             price=p,
             buyer_uuid=f"buyer-{i}",
