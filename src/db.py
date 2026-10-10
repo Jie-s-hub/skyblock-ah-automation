@@ -246,6 +246,7 @@ class DatabaseManager:
         features_json: Optional[str | dict[str, Any]] = None,
         timestamp: Optional[int] = None,
         *,
+        lane: Optional[str] = None,
         target_resell_price: Optional[int] = None,
         net_profit: Optional[int] = None,
         derpy_active: int = 0,
@@ -262,6 +263,8 @@ class DatabaseManager:
             resell_val = 0
         if profit_val is None:
             profit_val = 0
+        if lane:
+            valuation_path = lane
         feat_str = (
             features_json if isinstance(features_json, str) else json.dumps(features_json or {}, separators=(",", ":"))
         )
@@ -332,6 +335,7 @@ class DatabaseManager:
     def get_alerts(
         self,
         internal_id: Optional[str] = None,
+        lane: Optional[str] = None,
         start_time: Optional[int] = None,
         end_time: Optional[int] = None,
         limit: int = 100,
@@ -344,6 +348,9 @@ class DatabaseManager:
         if internal_id:
             clauses.append("internal_id = ?")
             params.append(internal_id)
+        if lane:
+            clauses.append("valuation_path = ?")
+            params.append(lane)
         if start_time is not None:
             clauses.append("timestamp >= ?")
             params.append(start_time)
