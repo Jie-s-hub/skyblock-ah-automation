@@ -6,28 +6,29 @@ import pytest
 
 from src.bazaar import BazaarCache
 from src.config import Settings
-from src.networth_evaluator import calculate_enchant_bazaar_cost
 
 
 @pytest.fixture
 def bz_cache() -> BazaarCache:
     config = Settings(DRY_RUN=True)
     cache = BazaarCache(config)
-    cache.set_mock_prices({
-        # Tier 1 books traded on Bazaar
-        "ENCHANTMENT_ULTIMATE_WISDOM_1": 250_000,
-        "ENCHANTMENT_ULTIMATE_WISE_1": 150_000,
-        "ENCHANTMENT_REJUVENATE_1": 50_000,
-        # Exact higher tier book
-        "ENCHANTMENT_GROWTH_6": 12_000_000,
-        "ENCHANTMENT_GROWTH_1": 100_000,
-        # Master Stars
-        "FIRST_MASTER_STAR": 5_000_000,
-        "SECOND_MASTER_STAR": 12_000_000,
-        "THIRD_MASTER_STAR": 25_000_000,
-        "FOURTH_MASTER_STAR": 55_000_000,
-        "FIFTH_MASTER_STAR": 110_000_000,
-    })
+    cache.set_mock_prices(
+        {
+            # Tier 1 books traded on Bazaar
+            "ENCHANTMENT_ULTIMATE_WISDOM_1": 250_000,
+            "ENCHANTMENT_ULTIMATE_WISE_1": 150_000,
+            "ENCHANTMENT_REJUVENATE_1": 50_000,
+            # Exact higher tier book
+            "ENCHANTMENT_GROWTH_6": 12_000_000,
+            "ENCHANTMENT_GROWTH_1": 100_000,
+            # Master Stars
+            "FIRST_MASTER_STAR": 5_000_000,
+            "SECOND_MASTER_STAR": 12_000_000,
+            "THIRD_MASTER_STAR": 25_000_000,
+            "FOURTH_MASTER_STAR": 55_000_000,
+            "FIFTH_MASTER_STAR": 110_000_000,
+        }
+    )
     return cache
 
 

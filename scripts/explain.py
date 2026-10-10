@@ -63,7 +63,9 @@ def explain_trace(alert_record: dict[str, Any]) -> None:
     print(f"  Buy Price:             {format_coins(alert_record.get('buy_price'))}")
     print(f"  Estimated Resell:      {format_coins(alert_record.get('estimated_resell'))}")
     if intermediates.get("suggested_list_price"):
-        print(f"  Suggested List Price:  {format_coins(intermediates['suggested_list_price'])} (fee cliff optimization)")
+        print(
+            f"  Suggested List Price:  {format_coins(intermediates['suggested_list_price'])} (fee cliff optimization)"
+        )
     print(f"  Projected Net Profit:  {format_coins(alert_record.get('projected_profit'))}")
     print(f"  Net Margin:            {alert_record.get('margin_pct', 0.0):.2f}%")
     print(f"  Confidence:            {conf_label}")
@@ -78,7 +80,9 @@ def explain_trace(alert_record: dict[str, Any]) -> None:
     if "estimated_hold_hours" in intermediates:
         print(f"  Estimated Hold:        {intermediates.get('estimated_hold_hours'):.1f} hours")
     if "craft_cost" in intermediates and intermediates.get("craft_cost"):
-        print(f"  Craft Ceiling:         {format_coins(intermediates.get('craft_cost'))} (capped={intermediates.get('is_craft_capped')})")
+        print(
+            f"  Craft Ceiling:         {format_coins(intermediates.get('craft_cost'))} (capped={intermediates.get('is_craft_capped')})"
+        )
     print(f"  Derpy Active:          {bool(alert_record.get('derpy_active', 0))}")
     print(f"  Fee Model Version:     v{alert_record.get('fee_model_version', 2)}")
     print("=" * 70)

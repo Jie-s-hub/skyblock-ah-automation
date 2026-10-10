@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import io
 from typing import Any
+
 import nbtlib
 import pytest
 
@@ -16,7 +17,6 @@ from src.constants.attributes import (
     check_god_roll,
     format_attributes,
     to_roman_numeral,
-    GOD_ROLL_BASE_VALUES,
 )
 from src.evaluator import FlipEvaluator, FlipResult
 from src.nbt_decoder import decode_item_bytes
@@ -35,25 +35,31 @@ def make_synthetic_attribute_nbt(
 
     extra_fields: dict[str, Any] = {
         "id": nbtlib.String(internal_id),
-        "attributes": nbtlib.Compound({
-            k: nbtlib.Int(v) for k, v in attributes.items()
-        }),
+        "attributes": nbtlib.Compound({k: nbtlib.Int(v) for k, v in attributes.items()}),
     }
     if stars > 0:
         extra_fields["dungeon_item_level"] = nbtlib.Int(stars)
 
-    tag = nbtlib.Compound({
-        "i": nbtlib.List[nbtlib.Compound]([
-            nbtlib.Compound({
-                "id": nbtlib.Short(311),
-                "Count": nbtlib.Byte(1),
-                "tag": nbtlib.Compound({
-                    "display": nbtlib.Compound({"Name": nbtlib.String(name)}),
-                    "ExtraAttributes": nbtlib.Compound(extra_fields),
-                }),
-            })
-        ])
-    })
+    tag = nbtlib.Compound(
+        {
+            "i": nbtlib.List[nbtlib.Compound](
+                [
+                    nbtlib.Compound(
+                        {
+                            "id": nbtlib.Short(311),
+                            "Count": nbtlib.Byte(1),
+                            "tag": nbtlib.Compound(
+                                {
+                                    "display": nbtlib.Compound({"Name": nbtlib.String(name)}),
+                                    "ExtraAttributes": nbtlib.Compound(extra_fields),
+                                }
+                            ),
+                        }
+                    )
+                ]
+            )
+        }
+    )
     nbt_file = nbtlib.File(tag)
     buf = io.BytesIO()
     nbt_file.save(buf, gzipped=True)

@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass, field
 import json
 import logging
 import math
 import time
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from src.bazaar import BazaarCache
 from src.config import Settings
 from src.db import DatabaseManager
-from src.sales_ingestor import generate_features_hash, generate_relaxed_features_hash
+from src.sales_ingestor import generate_features_hash
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,7 @@ def calculate_weighted_median(items: list[tuple[int, float]]) -> int:
     """Compute time-weighted median (q=0.50) from (price, weight) pairs."""
     return calculate_weighted_quantile(items, 0.50)
 
+
 def calculate_percentiles(prices: list[int]) -> tuple[int, int]:
     """Calculate P25 and P75 on prices."""
     if not prices:
@@ -189,8 +190,12 @@ def sanitize_comps(
         return []
 
     # 3. Actor Diversity Gate
-    distinct_buyers = {str(s.get("buyer_uuid") or "").strip() for s in capped_sales if str(s.get("buyer_uuid") or "").strip()}
-    distinct_sellers = {str(s.get("seller_uuid") or "").strip() for s in capped_sales if str(s.get("seller_uuid") or "").strip()}
+    distinct_buyers = {
+        str(s.get("buyer_uuid") or "").strip() for s in capped_sales if str(s.get("buyer_uuid") or "").strip()
+    }
+    distinct_sellers = {
+        str(s.get("seller_uuid") or "").strip() for s in capped_sales if str(s.get("seller_uuid") or "").strip()
+    }
 
     if len(distinct_buyers) < min_distinct_buyers or len(distinct_sellers) < min_distinct_sellers:
         logger.debug(

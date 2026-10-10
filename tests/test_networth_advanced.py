@@ -17,17 +17,19 @@ from src.networth_evaluator import (
 def bz_cache() -> BazaarCache:
     config = Settings(DRY_RUN=True)
     cache = BazaarCache(config)
-    cache.set_mock_prices({
-        "RECOMBOBULATOR_3000": 10_000_000,
-        "ESSENCE_WITHER": 4_000,
-        "FIRST_MASTER_STAR": 5_000_000,
-        "SECOND_MASTER_STAR": 12_000_000,
-        "THIRD_MASTER_STAR": 25_000_000,
-        "PERFECT_JASPER_GEM": 20_000_000,
-        "FLAWLESS_RUBY_GEM": 6_000_000,
-        "ENCHANTMENT_ULTIMATE_WISDOM_1": 250_000,
-        "PRECURSOR_GEAR": 8_000_000,
-    })
+    cache.set_mock_prices(
+        {
+            "RECOMBOBULATOR_3000": 10_000_000,
+            "ESSENCE_WITHER": 4_000,
+            "FIRST_MASTER_STAR": 5_000_000,
+            "SECOND_MASTER_STAR": 12_000_000,
+            "THIRD_MASTER_STAR": 25_000_000,
+            "PERFECT_JASPER_GEM": 20_000_000,
+            "FLAWLESS_RUBY_GEM": 6_000_000,
+            "ENCHANTMENT_ULTIMATE_WISDOM_1": 250_000,
+            "PRECURSOR_GEAR": 8_000_000,
+        }
+    )
     return cache
 
 

@@ -12,7 +12,6 @@ from src.bazaar import BazaarCache
 from src.config import Settings
 from src.db import DatabaseManager
 from src.evaluator import FlipEvaluator
-from src.networth_evaluator import calculate_item_networth, get_dynamic_retention_rate
 from src.retention_fitter import (
     RetentionFitter,
     calculate_observed_retention,
@@ -50,6 +49,7 @@ def dummy_bazaar_cache():
 # ---------------------------------------------------------------------------
 # 1. Pure Mathematical Formula Tests
 # ---------------------------------------------------------------------------
+
 
 def test_compute_empirical_bayes_retention_formula():
     # n = 0 -> returns prior
@@ -120,6 +120,7 @@ def test_calculate_observed_retention():
 # 2. Retention Fitter Prior & Tier Lookup Tests
 # ---------------------------------------------------------------------------
 
+
 def test_retention_fitter_priors(temp_db):
     settings = Settings(DRY_RUN=True)
     fitter = RetentionFitter(temp_db, settings)
@@ -132,6 +133,7 @@ def test_retention_fitter_priors(temp_db):
 # ---------------------------------------------------------------------------
 # 3. Fitting, Persistence & Database Operations Tests
 # ---------------------------------------------------------------------------
+
 
 def test_fit_item_retention_sample_size_threshold(temp_db):
     settings = Settings(DRY_RUN=True, MIN_RETENTION_SAMPLES=3)
@@ -182,6 +184,7 @@ def test_retention_fitter_toggle_behavior(temp_db):
 # 4. Fitting from Sales History
 # ---------------------------------------------------------------------------
 
+
 def test_fit_from_sales_history(temp_db, dummy_bazaar_cache):
     settings = Settings(DRY_RUN=True, ENABLE_DYNAMIC_RETENTION=True, MIN_RETENTION_SAMPLES=3)
     fitter = RetentionFitter(temp_db, settings, bazaar_cache=dummy_bazaar_cache)
@@ -212,6 +215,7 @@ def test_fit_from_sales_history(temp_db, dummy_bazaar_cache):
 # ---------------------------------------------------------------------------
 # 5. FlipEvaluator Path B Dynamic Retention Integration Tests
 # ---------------------------------------------------------------------------
+
 
 def test_flip_evaluator_uses_dynamic_retention_in_path_b(temp_db, dummy_bazaar_cache):
     # Enable dynamic retention

@@ -13,7 +13,7 @@ import pytest
 
 from src.bazaar import BazaarCache
 from src.config import Settings
-from src.constants.prestige import get_prestige_tier, is_divan_piece
+from src.constants.prestige import is_divan_piece
 from src.evaluator import FlipEvaluator
 from src.nbt_decoder import parse_divan_gemstone_chambers
 from src.networth_evaluator import calculate_enchant_bazaar_cost, calculate_item_addons
@@ -46,9 +46,11 @@ def test_book_tier_compounding_ultimate_wise_5(base_settings: Settings):
     exactly 2^(5 - 1) * 150,000 = 16 * 150,000 = 2,400,000 coins.
     """
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "ENCHANTMENT_ULTIMATE_WISE_1": 150_000,
-    })
+    cache.set_mock_prices(
+        {
+            "ENCHANTMENT_ULTIMATE_WISE_1": 150_000,
+        }
+    )
 
     # Test direct standalone calculator
     book_id, cost = calculate_enchant_bazaar_cost(cache, "ultimate_wise", 5)
@@ -68,9 +70,11 @@ def test_book_tier_compounding_ultimate_wise_5(base_settings: Settings):
 def test_book_compounding_in_full_evaluation(base_settings: Settings):
     """Verify that an item with Ultimate Wise 5 produces an itemized addon costing 2,400,000 coins."""
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "ENCHANTMENT_ULTIMATE_WISE_1": 150_000,
-    })
+    cache.set_mock_prices(
+        {
+            "ENCHANTMENT_ULTIMATE_WISE_1": 150_000,
+        }
+    )
     evaluator = FlipEvaluator(base_settings, bazaar_cache=cache)
     evaluator.set_price_cache({"BONZO_STAFF": [3_000_000, 3_500_000, 4_000_000]})
 
@@ -104,10 +108,12 @@ def test_book_compounding_in_full_evaluation(base_settings: Settings):
 def test_book_tier_exact_match_preferred_over_compounding():
     """Verify that if an exact tier book exists in Bazaar, its exact price is used without compounding."""
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "ENCHANTMENT_GROWTH_6": 8_000_000,
-        "ENCHANTMENT_GROWTH_1": 10_000,  # 2^5 * 10k = 320k (should NOT be used)
-    })
+    cache.set_mock_prices(
+        {
+            "ENCHANTMENT_GROWTH_6": 8_000_000,
+            "ENCHANTMENT_GROWTH_1": 10_000,  # 2^5 * 10k = 320k (should NOT be used)
+        }
+    )
 
     book_id, cost = calculate_enchant_bazaar_cost(cache, "growth", 6)
     assert book_id == "ENCHANTMENT_GROWTH_6"
@@ -138,11 +144,13 @@ def test_missing_clean_baseline_endgame_fallback(base_settings: Settings):
     without raising an exception.
     """
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "RECOMBOBULATOR_3000": 10_000_000,
-        "ESSENCE_WITHER": 4_000,  # 2,250 * 4,000 = 9,000,000
-        "WITHER_BLOOD": 6_000_000,
-    })
+    cache.set_mock_prices(
+        {
+            "RECOMBOBULATOR_3000": 10_000_000,
+            "ESSENCE_WITHER": 4_000,  # 2,250 * 4,000 = 9,000,000
+            "WITHER_BLOOD": 6_000_000,
+        }
+    )
 
     evaluator = FlipEvaluator(base_settings, bazaar_cache=cache)
 
@@ -175,11 +183,13 @@ def test_missing_clean_baseline_endgame_fallback(base_settings: Settings):
     }
 
     # Update cache from the 3 active listings
-    evaluator.update_cache([
-        (hyp1_raw, hyp1_dec),
-        (hyp2_raw, hyp2_dec),
-        (hyp3_raw, hyp3_dec),
-    ])
+    evaluator.update_cache(
+        [
+            (hyp1_raw, hyp1_dec),
+            (hyp2_raw, hyp2_dec),
+            (hyp3_raw, hyp3_dec),
+        ]
+    )
 
     # Assert 0 clean listings exist in clean cache
     assert evaluator.clean_price_cache.get("HYPERION", []) == []
@@ -254,10 +264,12 @@ def test_universal_blacklist_sheep_skin_and_rune_couture(base_settings: Settings
     evaluator = FlipEvaluator(base_settings)
 
     # Populate cache with high prices that would otherwise guarantee a flip
-    evaluator.set_price_cache({
-        "SHEEP_SKIN_NEON": [1_000_000, 50_000_000, 60_000_000],
-        "RUNE_COUTURE": [500_000, 20_000_000, 25_000_000],
-    })
+    evaluator.set_price_cache(
+        {
+            "SHEEP_SKIN_NEON": [1_000_000, 50_000_000, 60_000_000],
+            "RUNE_COUTURE": [500_000, 20_000_000, 25_000_000],
+        }
+    )
 
     # Test SHEEP_SKIN_NEON
     skin_auction = {
@@ -414,4 +426,3 @@ def test_divan_chambers_valuation_edge_case(base_settings: Settings):
     assert chamber_addon is not None
     assert chamber_addon["cost"] == 36_000_000
     assert chamber_addon["count"] == 3
-

@@ -1,6 +1,5 @@
 """Tests for capital-efficiency ranking and multi-factor confidence scoring (Phase 5)."""
 
-import pytest
 from src.config import Settings
 from src.evaluator import FlipEvaluator, FlipResult
 from src.ranking import (
@@ -115,7 +114,7 @@ def test_compute_confidence_score_low_deductions():
         daily_velocity=0.5,
         valuation_path="PATH_A",
         is_out_of_budget=True,  # -10 pts
-        is_craft_capped=True,   # -10 pts
+        is_craft_capped=True,  # -10 pts
     )
     # Path: 30 pts
     # Liq: 5 pts (vel < 1.0)
@@ -156,10 +155,12 @@ def test_flip_evaluator_populates_phase_5_metrics():
         ENABLE_CAPITAL_EFFICIENCY=True,
     )
     evaluator = FlipEvaluator(config=config)
-    evaluator.update_cache([
-        ({"starting_bid": 10_000_000}, {"internal_id": "TEST_SWORD"}),
-        ({"starting_bid": 15_000_000}, {"internal_id": "TEST_SWORD"}),
-    ])
+    evaluator.update_cache(
+        [
+            ({"starting_bid": 10_000_000}, {"internal_id": "TEST_SWORD"}),
+            ({"starting_bid": 15_000_000}, {"internal_id": "TEST_SWORD"}),
+        ]
+    )
 
     auction = {"uuid": "auc-123", "starting_bid": 10_000_000}
     decoded = {"internal_id": "TEST_SWORD", "item_name": "Test Sword"}
@@ -183,10 +184,12 @@ def test_flip_evaluator_filters_low_capital_efficiency():
         MIN_CAPITAL_EFFICIENCY=500.0,
     )
     evaluator = FlipEvaluator(config=config)
-    evaluator.update_cache([
-        ({"starting_bid": 10_000_000}, {"internal_id": "TEST_SWORD"}),
-        ({"starting_bid": 12_000_000}, {"internal_id": "TEST_SWORD"}),
-    ])
+    evaluator.update_cache(
+        [
+            ({"starting_bid": 10_000_000}, {"internal_id": "TEST_SWORD"}),
+            ({"starting_bid": 12_000_000}, {"internal_id": "TEST_SWORD"}),
+        ]
+    )
 
     auction = {"uuid": "auc-123", "starting_bid": 10_000_000}
     decoded = {"internal_id": "TEST_SWORD", "item_name": "Test Sword"}

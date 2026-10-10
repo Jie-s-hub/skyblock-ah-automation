@@ -79,11 +79,7 @@ def compute_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
 
     mean_pred = (sum(pred_margins) / len(pred_margins)) if pred_margins else 0.0
 
-    realized_margins = [
-        float(r["realized_net_margin"])
-        for r in records
-        if r.get("realized_net_margin") is not None
-    ]
+    realized_margins = [float(r["realized_net_margin"]) for r in records if r.get("realized_net_margin") is not None]
     mean_real = (sum(realized_margins) / len(realized_margins)) if realized_margins else None
 
     return {
@@ -151,26 +147,32 @@ def generate_report(db: DatabaseManager, csv_path: str | None = None) -> None:
     for (lane, label), group in sorted(lane_label_groups.items()):
         metrics = compute_metrics(group)
         real_str = f"{metrics['mean_real_margin']:.2f}%" if metrics["mean_real_margin"] is not None else "N/A"
-        print(row_fmt.format(
-            lane,
-            label,
-            metrics["n"],
-            metrics["sold_fast_rate"],
-            metrics["target_hit_rate"],
-            metrics["mean_pred_margin"],
-            real_str,
-        ))
+        print(
+            row_fmt.format(
+                lane,
+                label,
+                metrics["n"],
+                metrics["sold_fast_rate"],
+                metrics["target_hit_rate"],
+                metrics["mean_pred_margin"],
+                real_str,
+            )
+        )
 
-        csv_rows.append({
-            "dimension": "lane_label",
-            "group_key": lane,
-            "sub_key": label,
-            "n": metrics["n"],
-            "sold_fast_rate_pct": metrics["sold_fast_rate"],
-            "target_hit_rate_pct": metrics["target_hit_rate"],
-            "mean_predicted_margin_pct": metrics["mean_pred_margin"],
-            "mean_realized_margin_pct": metrics["mean_real_margin"] if metrics["mean_real_margin"] is not None else "",
-        })
+        csv_rows.append(
+            {
+                "dimension": "lane_label",
+                "group_key": lane,
+                "sub_key": label,
+                "n": metrics["n"],
+                "sold_fast_rate_pct": metrics["sold_fast_rate"],
+                "target_hit_rate_pct": metrics["target_hit_rate"],
+                "mean_predicted_margin_pct": metrics["mean_pred_margin"],
+                "mean_realized_margin_pct": metrics["mean_real_margin"]
+                if metrics["mean_real_margin"] is not None
+                else "",
+            }
+        )
 
     # 2. Group by Score Decile
     decile_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -178,10 +180,7 @@ def generate_report(db: DatabaseManager, csv_path: str | None = None) -> None:
         decile = get_decile_bucket(r.get("confidence_score"))
         decile_groups[decile].append(r)
 
-    decile_order = [
-        "90-100", "80-89", "70-79", "60-69", "50-59",
-        "40-49", "30-39", "20-29", "10-19", "0-9", "N/A"
-    ]
+    decile_order = ["90-100", "80-89", "70-79", "60-69", "50-59", "40-49", "30-39", "20-29", "10-19", "0-9", "N/A"]
 
     print("\n--- Breakdown: Confidence Score Decile ---")
     decile_header_fmt = "{:<16} {:>8} {:>14} {:>14} {:>14} {:>14}"
@@ -194,25 +193,31 @@ def generate_report(db: DatabaseManager, csv_path: str | None = None) -> None:
             group = decile_groups[decile]
             metrics = compute_metrics(group)
             real_str = f"{metrics['mean_real_margin']:.2f}%" if metrics["mean_real_margin"] is not None else "N/A"
-            print(decile_row_fmt.format(
-                decile,
-                metrics["n"],
-                metrics["sold_fast_rate"],
-                metrics["target_hit_rate"],
-                metrics["mean_pred_margin"],
-                real_str,
-            ))
+            print(
+                decile_row_fmt.format(
+                    decile,
+                    metrics["n"],
+                    metrics["sold_fast_rate"],
+                    metrics["target_hit_rate"],
+                    metrics["mean_pred_margin"],
+                    real_str,
+                )
+            )
 
-            csv_rows.append({
-                "dimension": "score_decile",
-                "group_key": decile,
-                "sub_key": "",
-                "n": metrics["n"],
-                "sold_fast_rate_pct": metrics["sold_fast_rate"],
-                "target_hit_rate_pct": metrics["target_hit_rate"],
-                "mean_predicted_margin_pct": metrics["mean_pred_margin"],
-                "mean_realized_margin_pct": metrics["mean_real_margin"] if metrics["mean_real_margin"] is not None else "",
-            })
+            csv_rows.append(
+                {
+                    "dimension": "score_decile",
+                    "group_key": decile,
+                    "sub_key": "",
+                    "n": metrics["n"],
+                    "sold_fast_rate_pct": metrics["sold_fast_rate"],
+                    "target_hit_rate_pct": metrics["target_hit_rate"],
+                    "mean_predicted_margin_pct": metrics["mean_pred_margin"],
+                    "mean_realized_margin_pct": metrics["mean_real_margin"]
+                    if metrics["mean_real_margin"] is not None
+                    else "",
+                }
+            )
 
     print("=" * 86)
 

@@ -1,12 +1,10 @@
 """Unit tests for flipper improvements: DB logging aliases, clean cache integrity, stacked items, craft recipes, and confidence scoring."""
 
-import pytest
 from src.config import Settings
+from src.craft_evaluator import calculate_craft_cost
 from src.db import DatabaseManager
 from src.evaluator import FlipEvaluator, FlipResult
-from src.nbt_decoder import decode_item_bytes
 from src.ranking import compute_confidence_score
-from src.craft_evaluator import calculate_craft_cost
 
 
 def test_db_log_alert_keyword_aliases(tmp_path):
@@ -153,11 +151,13 @@ def test_fragged_spirit_sceptre_above_upgrade_cost_rejected():
     evaluator = FlipEvaluator(cfg, bazaar_cache=fake_bazaar)
 
     # Base item has listings around 10M
-    evaluator.set_price_cache({
-        "BAT_WAND": [10_000_000, 10_200_000, 10_500_000],
-        # Another overpriced fragged sceptre sits at 15.2M
-        "STARRED_BAT_WAND": [10_500_000, 15_200_000],
-    })
+    evaluator.set_price_cache(
+        {
+            "BAT_WAND": [10_000_000, 10_200_000, 10_500_000],
+            # Another overpriced fragged sceptre sits at 15.2M
+            "STARRED_BAT_WAND": [10_500_000, 15_200_000],
+        }
+    )
 
     auction = {
         "uuid": "01c129b582da4a46bcabd863dcf4",
@@ -183,16 +183,20 @@ def test_fragged_spirit_sceptre_genuine_snipe_clamped_resell():
     Verify that if a fragged sceptre is listed well below craft cost (e.g. 7.5M),
     its target resell price is clamped to the craft/upgrade ceiling (~10.5M), NOT inflated to 15.2M.
     """
-    cfg = Settings(DRY_RUN=True, MIN_SAMPLE_SIZE=2, PATH_A_MIN_LISTINGS=2, MIN_PROFIT_COINS=500_000, MIN_PROFIT_MARGIN_PCT=10.0)
+    cfg = Settings(
+        DRY_RUN=True, MIN_SAMPLE_SIZE=2, PATH_A_MIN_LISTINGS=2, MIN_PROFIT_COINS=500_000, MIN_PROFIT_MARGIN_PCT=10.0
+    )
     fake_bazaar = {
         "THORN_FRAGMENT": 6_250,
     }
     evaluator = FlipEvaluator(cfg, bazaar_cache=fake_bazaar)
 
-    evaluator.set_price_cache({
-        "BAT_WAND": [10_000_000, 10_200_000],
-        "STARRED_BAT_WAND": [7_500_000, 15_200_000],
-    })
+    evaluator.set_price_cache(
+        {
+            "BAT_WAND": [10_000_000, 10_200_000],
+            "STARRED_BAT_WAND": [7_500_000, 15_200_000],
+        }
+    )
 
     auction = {
         "uuid": "snipe-uuid",
@@ -218,8 +222,8 @@ def test_fragged_spirit_sceptre_genuine_snipe_clamped_resell():
 
 def test_craftable_accessory_recipe_coverage():
     """Verify that all 181 craftable accessories are registered in RECIPES."""
-    from src.constants.recipes import get_recipe, RECIPES
     from src.constants.accessory_recipes import ACCESSORY_RECIPES
+    from src.constants.recipes import get_recipe
 
     assert len(ACCESSORY_RECIPES) == 181
     for acc_id in ACCESSORY_RECIPES:
@@ -246,9 +250,11 @@ def test_craftable_accessory_craft_cost_and_overpriced_rejection():
     assert craft_cost == 1_280_000
 
     # Put an overpriced listing on AH
-    evaluator.set_price_cache({
-        "CROPIE_TALISMAN": [2_500_000, 4_000_000],
-    })
+    evaluator.set_price_cache(
+        {
+            "CROPIE_TALISMAN": [2_500_000, 4_000_000],
+        }
+    )
 
     auction = {
         "uuid": "cropie-talisman-test",
@@ -267,5 +273,3 @@ def test_craftable_accessory_craft_cost_and_overpriced_rejection():
     # Must be rejected because 2.5M > 1.28M craft cost!
     result = evaluator.evaluate_listing(auction, decoded)
     assert result is None
-
-

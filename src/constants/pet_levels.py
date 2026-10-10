@@ -27,10 +27,10 @@ def _build_cumulative_table(max_xp: float, levels: int = 100) -> list[float]:
     Uses quadratic scaling matching SkyBlock's pet leveling progression.
     """
     table = [0.0]
-    total_weight = sum(i ** 1.8 for i in range(1, levels))
+    total_weight = sum(i**1.8 for i in range(1, levels))
     cumulative = 0.0
     for i in range(1, levels):
-        step = (i ** 1.8 / total_weight) * max_xp
+        step = (i**1.8 / total_weight) * max_xp
         cumulative += step
         table.append(cumulative)
     return table
@@ -38,8 +38,7 @@ def _build_cumulative_table(max_xp: float, levels: int = 100) -> list[float]:
 
 # Precompute cumulative XP tables per tier for fast binary/linear search
 PET_CUMULATIVE_XP_TABLES: dict[str, list[float]] = {
-    tier: _build_cumulative_table(max_xp, 100)
-    for tier, max_xp in PET_MAX_XP.items()
+    tier: _build_cumulative_table(max_xp, 100) for tier, max_xp in PET_MAX_XP.items()
 }
 
 
@@ -136,7 +135,7 @@ def get_pet_held_item_info(
 # Max-level premiums for meta pets (added on top of Level 1 base LBIN)
 MAX_LEVEL_PREMIUMS: dict[str, int] = {
     "GOLDEN_DRAGON": 400_000_000,  # Level 200 premium
-    "ENDER_DRAGON": 80_000_000,    # Level 100 premium
+    "ENDER_DRAGON": 80_000_000,  # Level 100 premium
     "BABY_YETI": 15_000_000,
     "BLACK_CAT": 15_000_000,
     "SHEEP": 10_000_000,
@@ -251,9 +250,7 @@ def get_pet_bucket_key(
     (effective_internal_id, level_bracket, candy_used_bool, skin_str, held_item_group)
     """
     pet_type = str(decoded.get("pet_type", "")).strip().upper()
-    effective_tier = str(
-        decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON")
-    ).strip().upper()
+    effective_tier = str(decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON")).strip().upper()
     effective_internal_id = f"PET_{pet_type}_{effective_tier}"
 
     level = int(decoded.get("pet_level", 1))
@@ -269,9 +266,7 @@ def get_pet_bucket_key(
     )
 
     held_item = decoded.get("pet_held_item", "")
-    held_group = get_held_item_group(
-        held_item, bazaar_cache=bazaar_cache, minor_threshold=minor_threshold
-    )
+    held_group = get_held_item_group(held_item, bazaar_cache=bazaar_cache, minor_threshold=minor_threshold)
 
     return (effective_internal_id, bracket, candy_used, skin, held_group)
 
@@ -294,4 +289,3 @@ def is_pet_xp_in_window(
     min_allowed = cand_xp * (1.0 - window_pct / 100.0)
     max_allowed = cand_xp * (1.0 + window_pct / 100.0)
     return min_allowed <= ref_xp <= max_allowed
-

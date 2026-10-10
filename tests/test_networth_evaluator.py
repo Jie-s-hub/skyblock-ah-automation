@@ -25,17 +25,19 @@ def base_settings() -> Settings:
 @pytest.fixture
 def mock_bazaar() -> BazaarCache:
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "RECOMBOBULATOR_3000": 10_000_000,
-        "ESSENCE_WITHER": 4_000,
-        "ESSENCE_UNDEAD": 1_000,
-        "PRECURSOR_GEAR": 7_000_000,
-        "DRAGON_CLAW": 5_000_000,
-        "ENCHANTMENT_ULTIMATE_SOUL_EATER_5": 16_000_000,
-        "ENCHANTMENT_ULTIMATE_LEGION_5": 20_000_000,
-        "ENCHANTMENT_SHARPNESS_7": 12_000_000,
-        "ENCHANTMENT_OVERLOAD_5": 8_000_000,
-    })
+    cache.set_mock_prices(
+        {
+            "RECOMBOBULATOR_3000": 10_000_000,
+            "ESSENCE_WITHER": 4_000,
+            "ESSENCE_UNDEAD": 1_000,
+            "PRECURSOR_GEAR": 7_000_000,
+            "DRAGON_CLAW": 5_000_000,
+            "ENCHANTMENT_ULTIMATE_SOUL_EATER_5": 16_000_000,
+            "ENCHANTMENT_ULTIMATE_LEGION_5": 20_000_000,
+            "ENCHANTMENT_SHARPNESS_7": 12_000_000,
+            "ENCHANTMENT_OVERLOAD_5": 8_000_000,
+        }
+    )
     return cache
 
 
@@ -64,26 +66,46 @@ def test_is_upgraded_item_detection(base_settings: Settings):
     assert evaluator.is_upgraded_item({**clean_item, "modifier": "spicy"}) is False
 
     # Valuable enchants
-    assert evaluator.is_upgraded_item({
-        **clean_item,
-        "enchantments": {"ultimate_soul_eater": 5},
-    }) is True
+    assert (
+        evaluator.is_upgraded_item(
+            {
+                **clean_item,
+                "enchantments": {"ultimate_soul_eater": 5},
+            }
+        )
+        is True
+    )
 
-    assert evaluator.is_upgraded_item({
-        **clean_item,
-        "enchantments": {"sharpness": 7},
-    }) is True
+    assert (
+        evaluator.is_upgraded_item(
+            {
+                **clean_item,
+                "enchantments": {"sharpness": 7},
+            }
+        )
+        is True
+    )
 
-    assert evaluator.is_upgraded_item({
-        **clean_item,
-        "enchantments": {"overload": 5},
-    }) is True
+    assert (
+        evaluator.is_upgraded_item(
+            {
+                **clean_item,
+                "enchantments": {"overload": 5},
+            }
+        )
+        is True
+    )
 
     # Standard non-valuable enchants
-    assert evaluator.is_upgraded_item({
-        **clean_item,
-        "enchantments": {"sharpness": 5, "protection": 5},
-    }) is False
+    assert (
+        evaluator.is_upgraded_item(
+            {
+                **clean_item,
+                "enchantments": {"sharpness": 5, "protection": 5},
+            }
+        )
+        is False
+    )
 
 
 def test_is_valuable_enchant_rules(base_settings: Settings):

@@ -59,27 +59,36 @@ def _append_confidence_and_efficiency_fields(fields: list[dict[str, Any]], flip:
         conf_str = f"**{badge}**"
         if getattr(flip, "confidence_score", None) is not None:
             conf_str += f" ({flip.confidence_score:.0f}/100)"
-        fields.append({
-            "name": "Confidence",
-            "value": conf_str,
-            "inline": True,
-        })
+        fields.append(
+            {
+                "name": "Confidence",
+                "value": conf_str,
+                "inline": True,
+            }
+        )
 
-    if getattr(flip, "capital_efficiency", None) is not None and getattr(flip, "estimated_hold_hours", None) is not None:
+    if (
+        getattr(flip, "capital_efficiency", None) is not None
+        and getattr(flip, "estimated_hold_hours", None) is not None
+    ):
         queue_note = f" (Queue: #{flip.queue_depth})" if getattr(flip, "queue_depth", 0) > 0 else ""
-        fields.append({
-            "name": "⏱️ Capital Efficiency",
-            "value": f"~{flip.estimated_hold_hours:.1f}h hold{queue_note} • **{flip.capital_efficiency:.1f}%/hr**",
-            "inline": True,
-        })
+        fields.append(
+            {
+                "name": "⏱️ Capital Efficiency",
+                "value": f"~{flip.estimated_hold_hours:.1f}h hold{queue_note} • **{flip.capital_efficiency:.1f}%/hr**",
+                "inline": True,
+            }
+        )
 
     if getattr(flip, "optimistic_upside", None) is not None and getattr(flip, "optimistic_target", None) is not None:
         if flip.optimistic_upside > flip.net_profit:
-            fields.append({
-                "name": "📈 Optimistic Upside (P75)",
-                "value": f"+{flip.optimistic_upside:,} coins (Target: {flip.optimistic_target:,})",
-                "inline": True,
-            })
+            fields.append(
+                {
+                    "name": "📈 Optimistic Upside (P75)",
+                    "value": f"+{flip.optimistic_upside:,} coins (Target: {flip.optimistic_target:,})",
+                    "inline": True,
+                }
+            )
 
 
 def format_resell_price_str(flip: FlipResult, suffix: str = "") -> str:
@@ -169,36 +178,42 @@ class DiscordNotifier:
         ]
 
         if flip.is_priority:
-            fields.append({
-                "name": "⚡ Priority Classification",
-                "value": f"**{flip.staple_category}** *(High Velocity Demand)*",
-                "inline": False,
-            })
+            fields.append(
+                {
+                    "name": "⚡ Priority Classification",
+                    "value": f"**{flip.staple_category}** *(High Velocity Demand)*",
+                    "inline": False,
+                }
+            )
 
         if flip.craft_cost is not None:
             craft_val = f"{flip.craft_cost:,} coins (Bazaar Instant-Buy)"
             if flip.is_craft_capped:
                 craft_val += f"\n⚠️ Resell Capped at: {flip.target_resell_price:,} coins"
-            fields.append({
-                "name": "Craft Cost Ceiling",
-                "value": craft_val,
-                "inline": False,
-            })
+            fields.append(
+                {
+                    "name": "Craft Cost Ceiling",
+                    "value": craft_val,
+                    "inline": False,
+                }
+            )
 
         _append_confidence_and_efficiency_fields(fields, flip)
 
-        fields.extend([
-            {
-                "name": "Upgrades",
-                "value": upgrades_display,
-                "inline": False,
-            },
-            {
-                "name": "Quick Command",
-                "value": f"```/viewauction {flip.auction_uuid}```",
-                "inline": False,
-            },
-        ])
+        fields.extend(
+            [
+                {
+                    "name": "Upgrades",
+                    "value": upgrades_display,
+                    "inline": False,
+                },
+                {
+                    "name": "Quick Command",
+                    "value": f"```/viewauction {flip.auction_uuid}```",
+                    "inline": False,
+                },
+            ]
+        )
 
         embed = {
             "title": title,
@@ -274,29 +289,35 @@ class DiscordNotifier:
         ]
 
         if flip.is_priority:
-            fields.append({
-                "name": "⚡ Priority Classification",
-                "value": f"**{flip.staple_category}** *(High Velocity Demand)*",
-                "inline": False,
-            })
+            fields.append(
+                {
+                    "name": "⚡ Priority Classification",
+                    "value": f"**{flip.staple_category}** *(High Velocity Demand)*",
+                    "inline": False,
+                }
+            )
 
         if flip.craft_cost is not None:
             craft_val = f"{flip.craft_cost:,} coins (Bazaar Instant-Buy)"
             if flip.is_craft_capped:
                 craft_val += f"\n⚠️ Resell Capped at: {flip.target_resell_price:,} coins"
-            fields.append({
-                "name": "Craft Cost Ceiling",
-                "value": craft_val,
-                "inline": False,
-            })
+            fields.append(
+                {
+                    "name": "Craft Cost Ceiling",
+                    "value": craft_val,
+                    "inline": False,
+                }
+            )
 
         _append_confidence_and_efficiency_fields(fields, flip)
 
-        fields.append({
-            "name": "Quick Command",
-            "value": f"```/viewauction {flip.auction_uuid}```",
-            "inline": False,
-        })
+        fields.append(
+            {
+                "name": "Quick Command",
+                "value": f"```/viewauction {flip.auction_uuid}```",
+                "inline": False,
+            }
+        )
 
         embed = {
             "title": title,
@@ -344,11 +365,13 @@ class DiscordNotifier:
 
         _append_confidence_and_efficiency_fields(fields, flip)
 
-        fields.append({
-            "name": "Quick Command",
-            "value": f"```/viewauction {flip.auction_uuid}```",
-            "inline": False,
-        })
+        fields.append(
+            {
+                "name": "Quick Command",
+                "value": f"```/viewauction {flip.auction_uuid}```",
+                "inline": False,
+            }
+        )
 
         embed = {
             "title": title,
@@ -414,53 +437,65 @@ class DiscordNotifier:
 
         if flip.reference_price is not None:
             ref_m = flip.reference_price / 1_000_000
-            fields.append({
-                "name": "Reference Price",
-                "value": f"{flip.reference_price:,} ({ref_m:.2f}M)",
-                "inline": True,
-            })
+            fields.append(
+                {
+                    "name": "Reference Price",
+                    "value": f"{flip.reference_price:,} ({ref_m:.2f}M)",
+                    "inline": True,
+                }
+            )
         else:
-            fields.append({
-                "name": "Base Lvl 1 Price",
-                "value": f"{base_val:,} ({base_m:.2f}M)",
-                "inline": True,
-            })
+            fields.append(
+                {
+                    "name": "Base Lvl 1 Price",
+                    "value": f"{base_val:,} ({base_m:.2f}M)",
+                    "inline": True,
+                }
+            )
 
-        fields.extend([
-            {
-                "name": "Estimated Worth",
-                "value": format_resell_price_str(flip, f" ({resell_m:.2f}M)"),
-                "inline": True,
-            },
-            {
-                "name": "Net Profit",
-                "value": f"+{flip.net_profit:,} coins ({flip.margin_pct:.1f}%)",
-                "inline": False,
-            },
-        ])
+        fields.extend(
+            [
+                {
+                    "name": "Estimated Worth",
+                    "value": format_resell_price_str(flip, f" ({resell_m:.2f}M)"),
+                    "inline": True,
+                },
+                {
+                    "name": "Net Profit",
+                    "value": f"+{flip.net_profit:,} coins ({flip.margin_pct:.1f}%)",
+                    "inline": False,
+                },
+            ]
+        )
 
         if flip.baseline_source:
-            fields.append({
-                "name": "Baseline Source",
-                "value": flip.baseline_source,
-                "inline": True,
-            })
+            fields.append(
+                {
+                    "name": "Baseline Source",
+                    "value": flip.baseline_source,
+                    "inline": True,
+                }
+            )
 
         if flip.comp_count is not None and flip.comp_count > 0:
             median_str = f"{flip.comp_median:,}" if flip.comp_median else "N/A"
-            fields.append({
-                "name": "Comparable Sales",
-                "value": f"{flip.comp_count} sales (Median: {median_str})",
-                "inline": True,
-            })
+            fields.append(
+                {
+                    "name": "Comparable Sales",
+                    "value": f"{flip.comp_count} sales (Median: {median_str})",
+                    "inline": True,
+                }
+            )
 
         _append_confidence_and_efficiency_fields(fields, flip)
 
-        fields.append({
-            "name": "Quick Command",
-            "value": f"```/viewauction {flip.auction_uuid}```",
-            "inline": False,
-        })
+        fields.append(
+            {
+                "name": "Quick Command",
+                "value": f"```/viewauction {flip.auction_uuid}```",
+                "inline": False,
+            }
+        )
 
         embed = {
             "title": title,
@@ -555,11 +590,12 @@ class DiscordNotifier:
                     f"  Net Profit:    +{flip.net_profit:,} coins ({flip.margin_pct:.1f}%)\n"
                     f"  Command:       /viewauction {flip.auction_uuid}\n"
                 )
+            logger.info("%s", msg)
             try:
-                print(msg)
-            except UnicodeEncodeError:
-                encoding = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
-                print(msg.encode(encoding, errors="replace").decode(encoding))
+                sys.stdout.write(msg + "\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
             logger.info("Dispatched dry-run alert for flip %s (%s)", flip.item_name, flip.auction_uuid)
             return True
 
@@ -705,11 +741,12 @@ class DiscordNotifier:
                 f"  PnL / Hour:       {pnl_sign}{trade.pnl_per_hour:,.0f} coins/hr\n"
                 f"  Command:          /viewauction {trade.auction_uuid}\n"
             )
+            logger.info("%s", msg)
             try:
-                print(msg)
-            except UnicodeEncodeError:
-                encoding = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
-                print(msg.encode(encoding, errors="replace").decode(encoding))
+                sys.stdout.write(msg + "\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
             logger.info("Dispatched dry-run trade completed alert for %s (%s)", trade.item_name, player_ign)
             return True
 
@@ -725,7 +762,9 @@ class DiscordNotifier:
             try:
                 async with session.post(target_webhook, json=payload) as resp:
                     if resp.status in (200, 204):
-                        logger.info("Successfully dispatched Discord trade alert for %s (%s)", trade.auction_uuid, player_ign)
+                        logger.info(
+                            "Successfully dispatched Discord trade alert for %s (%s)", trade.auction_uuid, player_ign
+                        )
                         await asyncio.sleep(0.5)
                         return True
                     if resp.status == 429:

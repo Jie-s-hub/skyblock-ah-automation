@@ -2,24 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
-import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import aiohttp
 
 from src.config import Settings
 from src.constants.taxes import (
-    calculate_progressive_ah_tax,
-    calculate_progressive_net_profit,
     collection_fee,
     creation_fee,
     net_revenue,
 )
-from src.db import DatabaseManager, get_db
+from src.db import DatabaseManager
 from src.nbt_decoder import decode_item_bytes
 
 logger = logging.getLogger(__name__)

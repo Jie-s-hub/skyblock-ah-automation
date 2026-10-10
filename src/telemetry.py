@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict, deque
-from datetime import datetime, timezone
 import json
 import logging
 import time
+from collections import defaultdict, deque
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 import aiohttp
@@ -16,7 +15,7 @@ from src.config import Settings
 from src.db import DatabaseManager
 
 if TYPE_CHECKING:
-    from src.velocity import SalesVelocityTracker
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +27,28 @@ class JsonLogFormatter(logging.Formatter):
     """
 
     STANDARD_ATTRS = {
-        "args", "asctime", "created", "exc_info", "exc_text", "filename",
-        "funcName", "levelname", "levelno", "lineno", "module", "msecs",
-        "message", "msg", "name", "pathname", "process", "processName",
-        "relativeCreated", "stack_info", "thread", "threadName",
+        "args",
+        "asctime",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "message",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "thread",
+        "threadName",
     }
 
     def format(self, record: logging.LogRecord) -> str:
@@ -80,9 +97,7 @@ class PipelineTelemetry:
         self.cycle_count: int = 0
         self.snipes_detected: int = 0
         self.error_count: int = 0
-        self._stage_latencies: dict[str, deque[float]] = defaultdict(
-            lambda: deque(maxlen=self.max_history_per_stage)
-        )
+        self._stage_latencies: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=self.max_history_per_stage))
         self._stage_run_counts: dict[str, int] = defaultdict(int)
         self._rejection_counts: dict[str, int] = defaultdict(int)
 
@@ -127,10 +142,7 @@ class PipelineTelemetry:
 
     def get_metrics(self) -> dict[str, Any]:
         """Return a dictionary snapshot of pipeline health metrics."""
-        avg_latencies = {
-            stage: round(self.get_average_latency(stage), 2)
-            for stage in self._stage_latencies
-        }
+        avg_latencies = {stage: round(self.get_average_latency(stage), 2) for stage in self._stage_latencies}
         return {
             "uptime_seconds": round(self.get_uptime_seconds(), 2),
             "cycle_count": self.cycle_count,
@@ -242,21 +254,15 @@ def build_health_embed(telemetry: Optional[PipelineTelemetry] = None) -> dict[st
 
     top_rejections = metrics.get("top_rejections") or []
     if top_rejections:
-        rejections_display = "\n".join(
-            [f"• `{reason}`: **{count:,}**" for reason, count in top_rejections]
-        )
-        fields.append(
-            {"name": "🚫 Top Rejections", "value": rejections_display, "inline": False}
-        )
+        rejections_display = "\n".join([f"• `{reason}`: **{count:,}**" for reason, count in top_rejections])
+        fields.append({"name": "🚫 Top Rejections", "value": rejections_display, "inline": False})
 
     return {
         "title": "🟢 Hypixel AH Monitor — Health Heartbeat",
         "description": "System operational and synchronizing with market feeds.",
         "color": embed_color,
         "fields": fields,
-        "footer": {
-            "text": f"Reported at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
-        },
+        "footer": {"text": f"Reported at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"},
     }
 
 

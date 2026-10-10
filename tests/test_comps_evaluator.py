@@ -5,18 +5,16 @@ from __future__ import annotations
 import os
 import tempfile
 import time
-from typing import Any
 
 import pytest
 
 from src.bazaar import BazaarCache
-from src.config import Settings
 from src.comps_evaluator import (
     CompsEvaluator,
-    CompsResult,
     calculate_iqr_bounds,
     calculate_weighted_median,
 )
+from src.config import Settings
 from src.db import DatabaseManager
 from src.evaluator import FlipEvaluator
 from src.sales_ingestor import (
@@ -60,6 +58,7 @@ def dummy_bazaar_cache():
 # ---------------------------------------------------------------------------
 # 1. Feature Hashing & Enchant Extraction Tests
 # ---------------------------------------------------------------------------
+
 
 def test_extract_high_tier_enchants():
     enchants = {
@@ -146,6 +145,7 @@ def test_generate_relaxed_features_hash():
 # 2. IQR Bounds & Weighted Median Mathematical Tests
 # ---------------------------------------------------------------------------
 
+
 def test_calculate_iqr_bounds_small_sample():
     prices = [10_000_000, 11_000_000, 12_000_000]
     lower, upper, spread = calculate_iqr_bounds(prices)
@@ -179,6 +179,7 @@ def test_calculate_weighted_median():
 # ---------------------------------------------------------------------------
 # 3. Sales Ingestion Engine Tests
 # ---------------------------------------------------------------------------
+
 
 def test_sales_ingestor_recording(temp_db):
     settings = Settings(DRY_RUN=True)
@@ -228,6 +229,7 @@ def test_sales_ingestor_recording(temp_db):
 # ---------------------------------------------------------------------------
 # 4. Comps Evaluator Tier Hierarchy & Divergence Tests
 # ---------------------------------------------------------------------------
+
 
 def test_comps_evaluator_tier_1_strict_match(temp_db):
     settings = Settings(DRY_RUN=True, MIN_COMPS_THRESHOLD=3, COMPS_WINDOW_HOURS=72.0)
@@ -389,6 +391,7 @@ def test_comps_evaluator_path_b_divergence_cap(temp_db):
 # ---------------------------------------------------------------------------
 # 5. FlipEvaluator Integration Tests
 # ---------------------------------------------------------------------------
+
 
 def test_flip_evaluator_uses_comps_when_enabled(temp_db, dummy_bazaar_cache):
     settings = Settings(
@@ -585,4 +588,3 @@ def test_comps_evaluator_exponential_time_decay_behavior(temp_db):
     assert res is not None
     # Because of exponential decay, fresh 20M sales carry significantly more weight than 60h-old 10M sales
     assert res.median_price == 20_000_000
-

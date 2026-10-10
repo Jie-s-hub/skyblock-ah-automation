@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
-import pytest
 from pathlib import Path
+
+import pytest
 
 from src.config import Settings
 from src.evaluator import FlipEvaluator, FlipResult
@@ -213,19 +214,9 @@ def test_is_velocity_sufficient_thresholds(base_config: Settings):
     # Fails default 5 sales/day
     assert tracker.is_velocity_sufficient("CUSTOM_ITEM", now=now) is False
     # Passes with custom min_daily_sales=2 and max_stale_hours=3.0
-    assert (
-        tracker.is_velocity_sufficient(
-            "CUSTOM_ITEM", min_daily_sales=2, max_stale_hours=3.0, now=now
-        )
-        is True
-    )
+    assert tracker.is_velocity_sufficient("CUSTOM_ITEM", min_daily_sales=2, max_stale_hours=3.0, now=now) is True
     # Fails if max_stale_hours is 0.5 (most recent sale was 1.0h ago)
-    assert (
-        tracker.is_velocity_sufficient(
-            "CUSTOM_ITEM", min_daily_sales=2, max_stale_hours=0.5, now=now
-        )
-        is False
-    )
+    assert tracker.is_velocity_sufficient("CUSTOM_ITEM", min_daily_sales=2, max_stale_hours=0.5, now=now) is False
 
 
 def test_disk_persistence_save_and_load(tmp_path: Path, base_config: Settings):
@@ -288,10 +279,12 @@ def test_flip_evaluator_integration_rejected_with_low_or_zero_velocity(base_conf
         tracker.record_sale("TRAP_SWORD", now - (i * 3600.0))
 
     evaluator = FlipEvaluator(base_config, velocity_tracker=tracker)
-    evaluator.set_price_cache({
-        "TRAP_SWORD": [10_000_000, 20_000_000, 22_000_000],
-        "ZERO_SALE_ITEM": [5_000_000, 10_000_000, 11_000_000],
-    })
+    evaluator.set_price_cache(
+        {
+            "TRAP_SWORD": [10_000_000, 20_000_000, 22_000_000],
+            "ZERO_SALE_ITEM": [5_000_000, 10_000_000, 11_000_000],
+        }
+    )
 
     # Test candidate with low velocity
     low_vel_auction = {"uuid": "test-uuid-low", "starting_bid": 10_000_000}

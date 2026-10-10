@@ -5,14 +5,12 @@ from __future__ import annotations
 import os
 import tempfile
 import time
-from typing import Any
 
 import pytest
 
 from src.capital_efficiency import calculate_capital_efficiency
 from src.comps_evaluator import (
     CompsEvaluator,
-    calculate_percentiles,
     sanitize_comps,
 )
 from src.config import Settings
@@ -21,8 +19,7 @@ from src.constants.taxes import (
     optimize_target_resell,
 )
 from src.db import DatabaseManager
-from src.evaluator import FlipEvaluator, FlipResult
-from src.ranking import score_and_rank_flip
+from src.evaluator import FlipEvaluator
 from src.sales_ingestor import generate_features_hash
 from src.telemetry import SurvivalAuditor
 from src.velocity import SalesVelocityTracker
@@ -44,6 +41,7 @@ def temp_db():
 # 1. Auction House Fee Restructuring & Cliff Snapping
 # ---------------------------------------------------------------------------
 
+
 def test_calculate_ah_fees_flat_tiers_and_collection_tax():
     """
     Verify exact Hypixel AH listing fee, collection tax, and total deductions:
@@ -54,8 +52,8 @@ def test_calculate_ah_fees_flat_tiers_and_collection_tax():
     """
     # 1. Sub-1M item (no collection tax)
     sub_1m = calculate_ah_fees(500_000)
-    assert sub_1m["listing_fee"] == 5_000      # 1%
-    assert sub_1m["collection_tax"] == 0      # < 1M
+    assert sub_1m["listing_fee"] == 5_000  # 1%
+    assert sub_1m["collection_tax"] == 0  # < 1M
     assert sub_1m["total_deductions"] == 5_000
     assert sub_1m["net_revenue"] == 495_000
 
@@ -71,21 +69,21 @@ def test_calculate_ah_fees_flat_tiers_and_collection_tax():
 
     # 2. Exactly at 9,999,999 (1% tier boundary)
     fees_9m = calculate_ah_fees(9_999_999)
-    assert fees_9m["listing_fee"] == 99_999    # 1% of 9,999,999
-    assert fees_9m["collection_tax"] == 99_999 # 1% of 9,999,999
+    assert fees_9m["listing_fee"] == 99_999  # 1% of 9,999,999
+    assert fees_9m["collection_tax"] == 99_999  # 1% of 9,999,999
     assert fees_9m["total_deductions"] == 199_998
     assert fees_9m["net_revenue"] == 9_800_001
 
     # 3. Exactly at 10,000,000 & 10,000,001 (2% tier boundary)
     fees_10m = calculate_ah_fees(10_000_000)
-    assert fees_10m["listing_fee"] == 200_000   # 2% of 10M
-    assert fees_10m["collection_tax"] == 100_000 # 1% of 10M
+    assert fees_10m["listing_fee"] == 200_000  # 2% of 10M
+    assert fees_10m["collection_tax"] == 100_000  # 1% of 10M
     assert fees_10m["total_deductions"] == 300_000
     assert fees_10m["net_revenue"] == 9_700_000
 
     fees_10m_1 = calculate_ah_fees(10_000_001)
-    assert fees_10m_1["listing_fee"] == 200_000   # 2% (200,000)
-    assert fees_10m_1["collection_tax"] == 100_000 # 1% (100,000)
+    assert fees_10m_1["listing_fee"] == 200_000  # 2% (200,000)
+    assert fees_10m_1["collection_tax"] == 100_000  # 1% (100,000)
     assert fees_10m_1["total_deductions"] == 300_000
     assert fees_10m_1["net_revenue"] == 9_700_001
 
@@ -94,8 +92,8 @@ def test_calculate_ah_fees_flat_tiers_and_collection_tax():
 
     # 4. Over 100M boundary (100,000,001)
     fees_100m = calculate_ah_fees(100_000_001)
-    assert fees_100m["listing_fee"] == 2_500_000   # 2.5% of 100M (2,500,000)
-    assert fees_100m["collection_tax"] == 1_000_000 # 1.0% of 100M (1,000,000)
+    assert fees_100m["listing_fee"] == 2_500_000  # 2.5% of 100M (2,500,000)
+    assert fees_100m["collection_tax"] == 1_000_000  # 1.0% of 100M (1,000,000)
     assert fees_100m["total_deductions"] == 3_500_000
     assert fees_100m["net_revenue"] == 96_500_001
 
@@ -112,9 +110,9 @@ def test_calculate_ah_fees_mayor_derpy_multiplier():
 
     # Asserts 4% collection tax when derpy=True
     assert normal_fees["collection_tax"] == 100_000  # 1%
-    assert derpy_fees["collection_tax"] == 400_000   # 4%
+    assert derpy_fees["collection_tax"] == 400_000  # 4%
     assert derpy_fees["collection_tax"] == normal_fees["collection_tax"] * 4
-    assert derpy_fees["listing_fee"] == 200_000      # 2% listing fee
+    assert derpy_fees["listing_fee"] == 200_000  # 2% listing fee
     assert derpy_fees["total_deductions"] == 600_000
     assert derpy_fees["net_revenue"] == 9_400_000
 
@@ -141,6 +139,7 @@ def test_optimize_target_resell_cliff_snapping():
 # 2. Queue Depth & Aligned Hold Time Modeling
 # ---------------------------------------------------------------------------
 
+
 def test_queue_depth_hold_time_scaling():
     """Verify hold time scales directly with order book queue depth."""
     daily_velocity = 24.0  # 1.0 sales per hour
@@ -160,11 +159,13 @@ def test_queue_depth_hold_time_scaling():
     # Queue depth 4 (4 cheaper listings ahead) -> T_hold = (4 + 1) / 1.0 = 5.0 hr
     hold_4, ces_4 = calculate_capital_efficiency(net_profit, buy_price, daily_velocity, queue_depth=4)
     assert hold_4 == 5.00
-    assert ces_4 == 4.00   # 4.0%
+    assert ces_4 == 4.00  # 4.0%
 
     # Minimum hold floor: when calculation < min_hold_hours (0.25h)
     fast_velocity = 2400.0  # 100 sales per hour
-    hold_fast, _ = calculate_capital_efficiency(net_profit, buy_price, fast_velocity, queue_depth=0, min_hold_hours=0.25)
+    hold_fast, _ = calculate_capital_efficiency(
+        net_profit, buy_price, fast_velocity, queue_depth=0, min_hold_hours=0.25
+    )
     assert hold_fast == 0.25
 
 
@@ -249,12 +250,19 @@ def test_distribution_aligned_gating_drops_p75_only_flips(temp_db):
 # 3. Anti-Wash Trading & Sold-Comps Sanitization
 # ---------------------------------------------------------------------------
 
+
 def test_sanitize_comps_self_trade_rejection():
     """Verify that comps where buyer_uuid == seller_uuid are completely dropped."""
     now = time.time() * 1000
     sales = [
         {"uuid": "s1", "buyer_uuid": "player-A", "seller_uuid": "player-B", "price": 10_000_000, "timestamp": now},
-        {"uuid": "s2", "buyer_uuid": "wash-trader", "seller_uuid": "wash-trader", "price": 50_000_000, "timestamp": now},
+        {
+            "uuid": "s2",
+            "buyer_uuid": "wash-trader",
+            "seller_uuid": "wash-trader",
+            "price": 50_000_000,
+            "timestamp": now,
+        },
         {"uuid": "s3", "buyer_uuid": "player-C", "seller_uuid": "player-D", "price": 10_500_000, "timestamp": now},
         {"uuid": "s4", "buyer_uuid": "player-E", "seller_uuid": "player-F", "price": 10_200_000, "timestamp": now},
     ]
@@ -285,15 +293,21 @@ def test_sanitize_comps_actor_dominance_truncation_and_diversity():
     # All 10 sales have distinct sellers 's1'..'s10'
     cluster_a = []
     for i in range(8):
-        cluster_a.append({
-            "uuid": f"whale-sale-{i}",
-            "buyer_uuid": "whale",
-            "seller_uuid": f"s-{i}",
-            "price": 10_000_000,
-            "timestamp": now - (i * 1000),  # whale-sale-0 is newest, 7 is oldest
-        })
-    cluster_a.append({"uuid": "sale-b2", "buyer_uuid": "b2", "seller_uuid": "s-8", "price": 10_000_000, "timestamp": now})
-    cluster_a.append({"uuid": "sale-b3", "buyer_uuid": "b3", "seller_uuid": "s-9", "price": 10_000_000, "timestamp": now})
+        cluster_a.append(
+            {
+                "uuid": f"whale-sale-{i}",
+                "buyer_uuid": "whale",
+                "seller_uuid": f"s-{i}",
+                "price": 10_000_000,
+                "timestamp": now - (i * 1000),  # whale-sale-0 is newest, 7 is oldest
+            }
+        )
+    cluster_a.append(
+        {"uuid": "sale-b2", "buyer_uuid": "b2", "seller_uuid": "s-8", "price": 10_000_000, "timestamp": now}
+    )
+    cluster_a.append(
+        {"uuid": "sale-b3", "buyer_uuid": "b3", "seller_uuid": "s-9", "price": 10_000_000, "timestamp": now}
+    )
 
     # Total 10 sales. Max allowed per actor = floor(10 * 0.333) = 3 sales.
     # Whale should keep 3 newest records (whale-sale-0, 1, 2) and have 5 oldest truncated.
@@ -313,15 +327,21 @@ def test_sanitize_comps_actor_dominance_truncation_and_diversity():
     # Only 2 distinct buyers total!
     cluster_b = []
     for i in range(8):
-        cluster_b.append({
-            "uuid": f"whale-sale-{i}",
-            "buyer_uuid": "whale",
-            "seller_uuid": f"s-{i}",
-            "price": 10_000_000,
-            "timestamp": now - (i * 1000),
-        })
-    cluster_b.append({"uuid": "sale-b2-1", "buyer_uuid": "b2", "seller_uuid": "s-8", "price": 10_000_000, "timestamp": now})
-    cluster_b.append({"uuid": "sale-b2-2", "buyer_uuid": "b2", "seller_uuid": "s-9", "price": 10_000_000, "timestamp": now})
+        cluster_b.append(
+            {
+                "uuid": f"whale-sale-{i}",
+                "buyer_uuid": "whale",
+                "seller_uuid": f"s-{i}",
+                "price": 10_000_000,
+                "timestamp": now - (i * 1000),
+            }
+        )
+    cluster_b.append(
+        {"uuid": "sale-b2-1", "buyer_uuid": "b2", "seller_uuid": "s-8", "price": 10_000_000, "timestamp": now}
+    )
+    cluster_b.append(
+        {"uuid": "sale-b2-2", "buyer_uuid": "b2", "seller_uuid": "s-9", "price": 10_000_000, "timestamp": now}
+    )
 
     # Even after truncation, distinct buyers = 2 < MIN_DISTINCT_BUYERS (3).
     # MUST BE REJECTED (returns empty list)!
@@ -332,6 +352,7 @@ def test_sanitize_comps_actor_dominance_truncation_and_diversity():
 # ---------------------------------------------------------------------------
 # 4. Market-Validated Alert Survival Tracking & Haircuts
 # ---------------------------------------------------------------------------
+
 
 def test_alert_survival_sniped_and_stale_resolution(temp_db):
     """

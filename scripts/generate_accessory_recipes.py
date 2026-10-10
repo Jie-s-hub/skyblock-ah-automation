@@ -5,7 +5,7 @@ with open("data/accessory_recipes_dump.json", "r", encoding="utf-8") as f:
 
 lines = [
     '"""Comprehensive registry of all craftable Hypixel SkyBlock accessories.',
-    '',
+    "",
     f"Contains {len(data)} craftable accessory recipes covering talismans, rings, artifacts, and relics.",
     '"""',
     "",

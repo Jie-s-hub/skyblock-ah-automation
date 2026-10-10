@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from scripts.ledger_cli import main as ledger_cli_main
@@ -231,7 +232,9 @@ def test_discord_completed_trade_embed(tracker_fixture: tuple[DatabaseManager, P
     assert "88,500,000 coins/hr" in field_map["PnL / Hour"]
 
 
-def test_portfolio_metrics_and_cli_player_stats(tracker_fixture: tuple[DatabaseManager, PlayerTradeTracker, str], capsys):
+def test_portfolio_metrics_and_cli_player_stats(
+    tracker_fixture: tuple[DatabaseManager, PlayerTradeTracker, str], capsys
+):
     """Verify get_portfolio_metrics and ledger_cli player-stats command."""
     db, tracker, db_file = tracker_fixture
 

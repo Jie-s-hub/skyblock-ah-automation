@@ -21,6 +21,8 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
+import threading
+
 from src.bazaar import BazaarCache
 from src.client import HypixelClient, calculate_next_poll_delay
 from src.config import Settings, get_settings
@@ -36,12 +38,28 @@ from src.telemetry import (
 )
 from src.velocity import SalesVelocityTracker
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("HypixelAHMonitor")
+
+def configure_process_logging(enable_json: bool = False, level: int = logging.INFO) -> logging.Logger:
+    """Ensure a single standardized logger configuration per process."""
+    root = logging.getLogger()
+    root.setLevel(level)
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    handler = logging.StreamHandler(sys.stdout)
+    if enable_json:
+        handler.setFormatter(JsonLogFormatter())
+    else:
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+    root.addHandler(handler)
+    return logging.getLogger("HypixelAHMonitor")
+
+
+logger = configure_process_logging()
 
 
 def parse_cli_args() -> argparse.Namespace:
@@ -170,14 +188,17 @@ async def run_monitor(
     ):
         try:
             from src.db import DatabaseManager
+
             db = DatabaseManager(settings.DB_PATH)
             if getattr(settings, "ENABLE_SOLD_COMPS", False):
                 from src.comps_evaluator import CompsEvaluator
                 from src.sales_ingestor import SalesIngestor
+
                 sales_ingestor = SalesIngestor(db, settings)
                 comps_evaluator = CompsEvaluator(db, settings, bazaar_cache=bazaar_cache)
             if getattr(settings, "ENABLE_DYNAMIC_RETENTION", False):
                 from src.retention_fitter import RetentionFitter
+
                 retention_fitter = RetentionFitter(db, settings, bazaar_cache=bazaar_cache)
         except Exception as err:
             logger.warning("Failed to initialize database or sold-comps components: %s", err)
@@ -191,6 +212,7 @@ async def run_monitor(
         db=db,
     )
     from src.election import MayorElectionTracker
+
     election_tracker = MayorElectionTracker(
         session=getattr(client, "_session", None),
         override=getattr(settings, "MAYOR_OVERRIDE", None),
@@ -200,6 +222,7 @@ async def run_monitor(
     if db is not None:
         try:
             from src.telemetry import SurvivalAuditor
+
             survival_auditor = SurvivalAuditor(db=db, velocity_tracker=velocity_tracker, config=settings)
             evaluator.set_survival_auditor(survival_auditor)
         except Exception as err:
@@ -219,6 +242,7 @@ async def run_monitor(
     if db is not None and getattr(settings, "ENABLE_PLAYER_TRACKING", False):
         try:
             from src.player_tracker import PlayerTracker
+
             player_tracker = PlayerTracker(db, config=settings, notifier=notifier)
         except Exception as err:
             logger.warning("Failed to initialize player tracking: %s", err)
@@ -227,6 +251,7 @@ async def run_monitor(
     if db is not None and getattr(settings, "ENABLE_OUTCOME_LABELING", True):
         try:
             from src.outcome_labeler import OutcomeLabeler
+
             outcome_labeler = OutcomeLabeler(db, config=settings)
         except Exception as err:
             logger.warning("Failed to initialize outcome labeler: %s", err)
@@ -443,14 +468,38 @@ async def run_monitor(
                 velocity_tracker.save_to_disk()
             except Exception as err:
                 logger.warning("Failed to save velocity cache on shutdown: %s", err)
-        await client.close()
-        await notifier.close()
-        await bazaar_cache.close()
+        try:
+            await client.close()
+        except Exception as err:
+            logger.warning("Failed to close Hypixel client: %s", err)
+        try:
+            await notifier.close()
+        except Exception as err:
+            logger.warning("Failed to close notifier: %s", err)
+        try:
+            await bazaar_cache.close()
+        except Exception as err:
+            logger.warning("Failed to close bazaar cache: %s", err)
         if ws_broadcaster:
-            await ws_broadcaster.stop()
+            try:
+                await ws_broadcaster.stop()
+            except Exception as err:
+                logger.warning("Failed to stop WS broadcaster: %s", err)
         if db is not None:
-            db.close()
+            try:
+                db.close()
+            except Exception as err:
+                logger.warning("Failed to close DB: %s", err)
         logger.info("Shutdown complete.")
+
+
+def cleanup_orphan_threads(timeout: float = 2.0) -> None:
+    """Join any non-daemon background threads before process exit."""
+    main_th = threading.main_thread()
+    for th in threading.enumerate():
+        if th is not main_th and th.is_alive() and not th.daemon:
+            logger.debug("Joining background thread: %s", th.name)
+            th.join(timeout=timeout)
 
 
 def main() -> None:
@@ -458,11 +507,8 @@ def main() -> None:
     args = parse_cli_args()
     settings = load_configured_settings(args)
 
-    if getattr(settings, "ENABLE_JSON_LOGGING", False):
-        root_logger = logging.getLogger()
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(JsonLogFormatter())
-        root_logger.handlers = [handler]
+    # Standardize on single process-wide logger
+    configure_process_logging(enable_json=getattr(settings, "ENABLE_JSON_LOGGING", False))
 
     stop_event = asyncio.Event()
 
@@ -483,6 +529,9 @@ def main() -> None:
         asyncio.run(run_monitor(settings, stop_event, max_cycles=max_cycles))
     except (KeyboardInterrupt, SystemExit):
         logger.info("Process interrupted. Exiting.")
+    finally:
+        cleanup_orphan_threads()
+        logging.shutdown()
 
 
 if __name__ == "__main__":

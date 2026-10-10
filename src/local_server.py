@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
+import hmac
+import ipaddress
 import json
 import logging
 import time
+import urllib.parse
+from http import HTTPStatus
 from typing import Any, Optional, Set
 
 import websockets
@@ -116,19 +119,83 @@ class LocalWebSocketBroadcaster:
         host: str = "127.0.0.1",
         port: int = 8765,
         config: Optional[Settings] = None,
+        allowed_origins: Optional[list[str] | set[str]] = None,
+        token: Optional[str] = None,
     ) -> None:
         if config:
             self.host = getattr(config, "LOCAL_WS_HOST", host)
             self.port = getattr(config, "LOCAL_WS_PORT", port)
+            self.allowed_origins = set(getattr(config, "LOCAL_WS_ALLOWED_ORIGINS", []))
+            self.token = getattr(config, "LOCAL_WS_TOKEN", "")
         else:
             self.host = host
             self.port = port
+            self.allowed_origins = set(allowed_origins or [])
+            self.token = token or ""
+
+        # Phase 6 Hardening: Refuse non-loopback hosts (bind 127.0.0.1 only)
+        if not self._is_loopback_host(self.host):
+            raise ValueError(f"Local WebSocket server only binds to loopback hosts (refused '{self.host}').")
 
         self.config = config
         self.clients: Set[Any] = set()
         self._server: Optional[Any] = None
         self._running: bool = False
         self._actual_port: int = self.port
+
+    @staticmethod
+    def _is_loopback_host(host: str) -> bool:
+        """Verify whether the requested host interface is a loopback address."""
+        if host in ("127.0.0.1", "localhost", "::1", "[::1]"):
+            return True
+        try:
+            return ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return False
+
+    def _process_request(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Validate incoming WebSocket handshake:
+        - Reject any handshake carrying an Origin header not listed in LOCAL_WS_ALLOWED_ORIGINS.
+        - Check optional LOCAL_WS_TOKEN as a ?token= query parameter checked via hmac.compare_digest.
+        """
+        if len(args) == 2:
+            first, second = args
+            if isinstance(first, str):
+                path = first
+                headers = second
+                respond_fn = None
+            else:
+                connection = first
+                request = second
+                path = getattr(request, "path", "/")
+                headers = getattr(request, "headers", {})
+                respond_fn = getattr(connection, "respond", None)
+        else:
+            path = "/"
+            headers = {}
+            respond_fn = None
+
+        # 1. Origin header check: reject any handshake carrying an Origin header not listed in allowed_origins
+        origin = headers.get("Origin")
+        if origin is not None and origin not in self.allowed_origins:
+            logger.warning("Rejected WebSocket handshake carrying disallowed Origin: %s", origin)
+            if respond_fn:
+                return respond_fn(HTTPStatus.FORBIDDEN, "Forbidden: Disallowed Origin\n")
+            return (HTTPStatus.FORBIDDEN, [], b"Forbidden: Disallowed Origin\n")
+
+        # 2. Token check: optional LOCAL_WS_TOKEN as a ?token= query parameter checked with hmac.compare_digest
+        if self.token:
+            query = urllib.parse.urlparse(path).query
+            params = urllib.parse.parse_qs(query)
+            token_param = params.get("token", [""])[0]
+            if not hmac.compare_digest(token_param, self.token):
+                logger.warning("Rejected WebSocket handshake with missing or invalid token.")
+                if respond_fn:
+                    return respond_fn(HTTPStatus.UNAUTHORIZED, "Unauthorized: Invalid or missing token\n")
+                return (HTTPStatus.UNAUTHORIZED, [], b"Unauthorized: Invalid or missing token\n")
+
+        return None
 
     @property
     def actual_port(self) -> int:
@@ -158,8 +225,18 @@ class LocalWebSocketBroadcaster:
         if self._running:
             return
 
+        if not self.token:
+            logger.warning(
+                "LOCAL_WS_TOKEN is not configured; local WebSocket server is accessible without authentication."
+            )
+
         logger.info("Starting local WebSocket server on ws://%s:%d", self.host, self.port)
-        self._server = await websockets.serve(self._handler, self.host, self.port)
+        self._server = await websockets.serve(
+            self._handler,
+            self.host,
+            self.port,
+            process_request=self._process_request,
+        )
         self._running = True
 
         # Extract actual bound port if ephemeral

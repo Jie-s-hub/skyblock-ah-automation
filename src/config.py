@@ -1,4 +1,5 @@
 from typing import Any, Optional
+
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -140,11 +141,19 @@ class Settings(BaseSettings):
     )
     LOCAL_WS_HOST: str = Field(
         default="127.0.0.1",
-        description="Host interface for local WebSocket server",
+        description="Host interface for local WebSocket server (loopback only: 127.0.0.1)",
     )
     LOCAL_WS_PORT: int = Field(
         default=8765,
         description="Port for local WebSocket server (default: 8765)",
+    )
+    LOCAL_WS_TOKEN: str = Field(
+        default="",
+        description="Optional authentication token required as ?token= query parameter for local WS connections",
+    )
+    LOCAL_WS_ALLOWED_ORIGINS: list[str] = Field(
+        default_factory=list,
+        description="Allowed Origin headers for local WebSocket connections (default empty: reject all origins)",
     )
 
     # Craft cost ceiling & anti-craft-bait configuration
@@ -168,7 +177,6 @@ class Settings(BaseSettings):
         default=1.02,
         description="Clamped resell multiplier for manipulated craftable markets (1.02)",
     )
-
 
     # Stale auction and ghost listing guardrails
     MAX_BENCHMARK_AGE_HOURS: float = Field(
@@ -267,6 +275,15 @@ class Settings(BaseSettings):
     def _parse_shadow_mode_lanes(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             return [lane.strip() for lane in v.split(",") if lane.strip()]
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        return []
+
+    @field_validator("LOCAL_WS_ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def _parse_local_ws_allowed_origins(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         if isinstance(v, list):
             return [str(x).strip() for x in v if str(x).strip()]
         return []
@@ -506,6 +523,7 @@ class Settings(BaseSettings):
     def validate_webhook_and_defaults(self) -> "Settings":
         """Ensure valid webhook in production mode and fallback in dry run mode."""
         import logging
+
         cfg_logger = logging.getLogger(__name__)
         if self.AH_TAX_RATE != 0.02 or self.USE_PROGRESSIVE_TAX:
             cfg_logger.warning(

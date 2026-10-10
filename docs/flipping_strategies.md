@@ -582,12 +582,14 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
 
+
 class StrategyArchetype(str, Enum):
     STANDARD_BIN = "STANDARD_BIN"
     BZ_TO_AH_CRAFT = "BZ_TO_AH_CRAFT"
     KAT_PET_UPGRADE = "KAT_PET_UPGRADE"
     KUUDRA_ATTRIBUTE = "KUUDRA_ATTRIBUTE"
     UPGRADE_UNBUNDLING = "UPGRADE_UNBUNDLING"
+
 
 class AdvancedFlipOpportunity(BaseModel):
     archetype: StrategyArchetype
@@ -600,7 +602,7 @@ class AdvancedFlipOpportunity(BaseModel):
     margin_pct: float
     turnover_velocity_24h: float
     liquidity_risk_score: float  # 0.0 (liquid) to 1.0 (illiquid)
-    
+
     # Archetype-Specific Telemetry
     recipe_components: Optional[dict[str, int]] = None
     pet_level: Optional[int] = None

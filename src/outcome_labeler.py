@@ -157,6 +157,7 @@ class OutcomeLabeler:
                 is_match = False
                 if features.get("is_pet"):
                     from src.constants.pet_levels import get_pet_bucket_key
+
                     is_match = get_pet_bucket_key(s_decoded) == get_pet_bucket_key(features)
                 else:
                     s_hash = generate_relaxed_features_hash(s_decoded)

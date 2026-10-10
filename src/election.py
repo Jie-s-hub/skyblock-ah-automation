@@ -80,11 +80,23 @@ class MayorElectionTracker:
                     self._last_mayor_name = mayor_name
                     self._last_known_derpy = mayor_name.lower() == "derpy"
                     self._last_checked_ms = now_ms
-                    logger.info("Hypixel mayor election updated: active mayor='%s', derpy=%s", mayor_name, self._last_known_derpy)
+                    logger.info(
+                        "Hypixel mayor election updated: active mayor='%s', derpy=%s",
+                        mayor_name,
+                        self._last_known_derpy,
+                    )
                 else:
-                    logger.warning("Hypixel election API returned HTTP %s; keeping last known derpy=%s", resp.status, self._last_known_derpy)
+                    logger.warning(
+                        "Hypixel election API returned HTTP %s; keeping last known derpy=%s",
+                        resp.status,
+                        self._last_known_derpy,
+                    )
         except Exception as err:  # noqa: BLE001
-            logger.warning("Failed to fetch Hypixel election resource: %s; keeping last known derpy=%s", err, self._last_known_derpy)
+            logger.warning(
+                "Failed to fetch Hypixel election resource: %s; keeping last known derpy=%s",
+                err,
+                self._last_known_derpy,
+            )
         finally:
             if should_close:
                 await sess.close()

@@ -4,8 +4,8 @@ Tests for sub-second API clock synchronization, next poll delay calculation, and
 
 from __future__ import annotations
 
-import time
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from src.client import HypixelClient, calculate_next_poll_delay
@@ -83,15 +83,17 @@ async def test_hypixel_client_tracks_last_updated_and_headers():
         "Last-Modified": "Fri, 09 Oct 2026 03:00:00 GMT",
         "Date": "Fri, 09 Oct 2026 03:00:15 GMT",
     }
-    mock_resp.json = AsyncMock(return_value={
-        "success": True,
-        "page": 0,
-        "totalPages": 1,
-        "lastUpdated": 1_700_000_000_000,
-        "auctions": [
-            {"uuid": "bin-test", "bin": True, "starting_bid": 1_000_000},
-        ],
-    })
+    mock_resp.json = AsyncMock(
+        return_value={
+            "success": True,
+            "page": 0,
+            "totalPages": 1,
+            "lastUpdated": 1_700_000_000_000,
+            "auctions": [
+                {"uuid": "bin-test", "bin": True, "starting_bid": 1_000_000},
+            ],
+        }
+    )
 
     mock_session = MagicMock()
     mock_session.get.return_value.__aenter__.return_value = mock_resp

@@ -10,28 +10,25 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from src.bazaar import BazaarCache
-from src.config import Settings, get_settings
+from src.config import get_settings
 from src.constants.prestige import (
     get_prestige_tier,
-    is_divan_piece,
-    is_kuudra_armor,
 )
 from src.evaluator import FlipEvaluator, FlipResult
-from src.nbt_decoder import decode_item_bytes, parse_divan_gemstone_chambers
-from src.networth_evaluator import calculate_item_addons, calculate_item_networth
-from src.notifier import DiscordNotifier, format_upgrades
+from src.nbt_decoder import parse_divan_gemstone_chambers
+from src.networth_evaluator import calculate_item_addons
+from src.notifier import DiscordNotifier
 from src.stream_client import WebSocketFeedClient, normalize_auction_payload
-
-
 
 # =====================================================================
 # 2. CRIMSON ISLE PRESTIGE ARMOR TIERS
 # =====================================================================
+
 
 def test_prestige_tier_detection():
     """Verify that get_prestige_tier correctly categorizes Crimson Isle tiers."""
@@ -51,10 +48,12 @@ def test_prestige_armor_benchmarked_strictly_against_same_tier():
     """
     config = get_settings(DRY_RUN=True, MIN_SAMPLE_SIZE=2, MIN_PROFIT_COINS=1_000_000)
     bz = BazaarCache(config)
-    bz.set_mock_prices({
-        "RECOMBOBULATOR_3000": 10_000_000,
-        "ESSENCE_CRIMSON": 4_000,
-    })
+    bz.set_mock_prices(
+        {
+            "RECOMBOBULATOR_3000": 10_000_000,
+            "ESSENCE_CRIMSON": 4_000,
+        }
+    )
 
     evaluator = FlipEvaluator(config=config, bazaar_cache=bz)
 
@@ -65,11 +64,23 @@ def test_prestige_armor_benchmarked_strictly_against_same_tier():
     start_time = now_ms - 60_000
     auctions = [
         # Basic Crimson listings
-        ({"starting_bid": 15_000_000, "start": start_time}, {"internal_id": "CRIMSON_CHESTPLATE", "dungeon_stars": 0, "rarity_upgrades": 0}),
-        ({"starting_bid": 16_000_000, "start": start_time}, {"internal_id": "CRIMSON_CHESTPLATE", "dungeon_stars": 0, "rarity_upgrades": 0}),
+        (
+            {"starting_bid": 15_000_000, "start": start_time},
+            {"internal_id": "CRIMSON_CHESTPLATE", "dungeon_stars": 0, "rarity_upgrades": 0},
+        ),
+        (
+            {"starting_bid": 16_000_000, "start": start_time},
+            {"internal_id": "CRIMSON_CHESTPLATE", "dungeon_stars": 0, "rarity_upgrades": 0},
+        ),
         # Burning Crimson listings
-        ({"starting_bid": 150_000_000, "start": start_time}, {"internal_id": "BURNING_CRIMSON_CHESTPLATE", "dungeon_stars": 0, "rarity_upgrades": 0}),
-        ({"starting_bid": 160_000_000, "start": start_time}, {"internal_id": "BURNING_CRIMSON_CHESTPLATE", "dungeon_stars": 0, "rarity_upgrades": 0}),
+        (
+            {"starting_bid": 150_000_000, "start": start_time},
+            {"internal_id": "BURNING_CRIMSON_CHESTPLATE", "dungeon_stars": 0, "rarity_upgrades": 0},
+        ),
+        (
+            {"starting_bid": 160_000_000, "start": start_time},
+            {"internal_id": "BURNING_CRIMSON_CHESTPLATE", "dungeon_stars": 0, "rarity_upgrades": 0},
+        ),
     ]
 
     evaluator.update_cache(auctions, now_ms=now_ms)
@@ -104,6 +115,7 @@ def test_prestige_armor_benchmarked_strictly_against_same_tier():
 # 3. DIVAN'S ARMOR GEMSTONE CHAMBERS VALUATION
 # =====================================================================
 
+
 def test_parse_divan_gemstone_chambers():
     """Verify parsing unlocked gemstone chambers on Divan's Armor."""
     # Test from explicit field
@@ -124,9 +136,11 @@ def test_divan_gemstone_chambers_networth_valuation():
     """Verify that unlocked gemstone chambers add correct Bazaar worth to Divan pieces."""
     config = get_settings(DRY_RUN=True)
     bz = BazaarCache(config)
-    bz.set_mock_prices({
-        "GEMSTONE_CHAMBER": 10_000_000,
-    })
+    bz.set_mock_prices(
+        {
+            "GEMSTONE_CHAMBER": 10_000_000,
+        }
+    )
 
     decoded = {
         "internal_id": "DIVAN_CHESTPLATE",
@@ -147,15 +161,18 @@ def test_divan_gemstone_chambers_networth_valuation():
 # 4. SECONDARY FLAT ADDONS (ART OF WAR, WOOD SINGULARITY, TUNERS)
 # =====================================================================
 
+
 def test_secondary_flat_addons_valuation():
     """Verify valuation of The Art of War, Wood Singularity, and Transmission Tuners."""
     config = get_settings(DRY_RUN=True)
     bz = BazaarCache(config)
-    bz.set_mock_prices({
-        "THE_ART_OF_WAR": 6_500_000,
-        "WOOD_SINGULARITY": 4_000_000,
-        "TRANSMISSION_TUNER": 800_000,
-    })
+    bz.set_mock_prices(
+        {
+            "THE_ART_OF_WAR": 6_500_000,
+            "WOOD_SINGULARITY": 4_000_000,
+            "TRANSMISSION_TUNER": 800_000,
+        }
+    )
 
     decoded = {
         "internal_id": "ASPECT_OF_THE_VOID",
@@ -192,6 +209,7 @@ def test_is_upgraded_item_detects_secondary_addons():
 # 5. STALE AUCTION AGE FILTERING (GHOST LISTINGS)
 # =====================================================================
 
+
 def test_stale_auction_filter_rejects_old_listings():
     """update_cache keeps old-but-live listings and drops only expired ones (end time passed)."""
     config = get_settings(DRY_RUN=True, MAX_BENCHMARK_AGE_HOURS=12.0)
@@ -201,11 +219,20 @@ def test_stale_auction_filter_rejects_old_listings():
     hour_ms = 3_600_000
     auctions = [
         # 2h old, live -> keep
-        ({"starting_bid": 10_000_000, "start": now_ms - (2 * hour_ms), "end": now_ms + (46 * hour_ms)}, {"internal_id": "TEST_ITEM"}),
+        (
+            {"starting_bid": 10_000_000, "start": now_ms - (2 * hour_ms), "end": now_ms + (46 * hour_ms)},
+            {"internal_id": "TEST_ITEM"},
+        ),
         # 21h old, still live (48h auction) -> keep
-        ({"starting_bid": 11_000_000, "start": now_ms - (21 * hour_ms), "end": now_ms + (27 * hour_ms)}, {"internal_id": "TEST_ITEM"}),
+        (
+            {"starting_bid": 11_000_000, "start": now_ms - (21 * hour_ms), "end": now_ms + (27 * hour_ms)},
+            {"internal_id": "TEST_ITEM"},
+        ),
         # Already ended -> drop
-        ({"starting_bid": 12_000_000, "start": now_ms - (50 * hour_ms), "end": now_ms - (2 * hour_ms)}, {"internal_id": "TEST_ITEM"}),
+        (
+            {"starting_bid": 12_000_000, "start": now_ms - (50 * hour_ms), "end": now_ms - (2 * hour_ms)},
+            {"internal_id": "TEST_ITEM"},
+        ),
         # No end time known -> keep
         ({"starting_bid": 13_000_000, "start": now_ms - (30 * hour_ms)}, {"internal_id": "TEST_ITEM"}),
     ]
@@ -246,11 +273,34 @@ def test_florid_regression_clean_item_not_priced_off_starred_or_old_listings():
     candidate = {"uuid": "cand", "starting_bid": 1_560_000, "start": now_ms - hour_ms, "end": now_ms + 15 * hour_ms}
     auctions = [(candidate, clean)]
     auctions += [
-        ({"uuid": f"old-{i}", "starting_bid": 1_589_999, "start": now_ms - 21 * hour_ms, "end": now_ms + 27 * hour_ms}, clean)
+        (
+            {
+                "uuid": f"old-{i}",
+                "starting_bid": 1_589_999,
+                "start": now_ms - 21 * hour_ms,
+                "end": now_ms + 27 * hour_ms,
+            },
+            clean,
+        )
         for i in range(11)
     ]
-    auctions.append(({"uuid": "star5", "starting_bid": 3_000_000, "start": now_ms - 4 * hour_ms, "end": now_ms + 44 * hour_ms}, starred))
-    auctions.append(({"uuid": "heroic", "starting_bid": 35_000_000, "start": now_ms - 5 * hour_ms, "end": now_ms + 330 * hour_ms}, starred))
+    auctions.append(
+        (
+            {"uuid": "star5", "starting_bid": 3_000_000, "start": now_ms - 4 * hour_ms, "end": now_ms + 44 * hour_ms},
+            starred,
+        )
+    )
+    auctions.append(
+        (
+            {
+                "uuid": "heroic",
+                "starting_bid": 35_000_000,
+                "start": now_ms - 5 * hour_ms,
+                "end": now_ms + 330 * hour_ms,
+            },
+            starred,
+        )
+    )
 
     evaluator.update_cache(auctions, now_ms=now_ms)
     assert evaluator.evaluate_listing(candidate, clean, now_ms=now_ms) is None
@@ -298,6 +348,7 @@ def test_florid_regression_clean_item_not_priced_off_starred_or_old_listings():
 # =====================================================================
 # 6. PURSE BUDGET GATE & OUT_OF_BUDGET ROUTING
 # =====================================================================
+
 
 def test_evaluator_sets_is_out_of_budget():
     """Verify FlipResult correctly flags is_out_of_budget when buy_price > MAX_PURSE_BUDGET."""
@@ -396,6 +447,7 @@ async def test_discord_notifier_drops_out_of_budget_when_no_secondary_webhook():
 # =====================================================================
 # 7. WEBSOCKET FIREHOSE INGESTION & NORMALIZATION
 # =====================================================================
+
 
 def test_normalize_auction_payload_coflnet_format():
     """Verify normalize_auction_payload parses Coflnet modsocket wrapper payloads."""

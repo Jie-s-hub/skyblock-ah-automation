@@ -42,6 +42,7 @@ def phase5_db(tmp_path):
 # 1. IQR Scrubbing Gate (n >= 8)
 # ---------------------------------------------------------------------------
 
+
 def test_iqr_scrubbing_gate_under_8_samples():
     # 7 samples with an extreme outlier at 100M
     prices = [10_000_000, 10_100_000, 10_200_000, 10_300_000, 10_400_000, 10_500_000, 100_000_000]
@@ -67,6 +68,7 @@ def test_iqr_scrubbing_gate_at_8_samples():
 # ---------------------------------------------------------------------------
 # 2. Time-Decayed Weighted Quantile Function
 # ---------------------------------------------------------------------------
+
 
 def test_calculate_weighted_quantiles():
     # Equal weights
@@ -97,6 +99,7 @@ def test_calculate_weighted_quantiles():
 # ---------------------------------------------------------------------------
 # 3. CompsEvaluator Returns Weighted p25/p50/p75 and Quick-Sale Price
 # ---------------------------------------------------------------------------
+
 
 def test_comps_evaluator_returns_weighted_quantiles(phase5_db):
     settings = Settings(DRY_RUN=True, QUICK_SALE_QUANTILE=0.25, MIN_COMPS_THRESHOLD=3)
@@ -134,6 +137,7 @@ def test_comps_evaluator_returns_weighted_quantiles(phase5_db):
 # ---------------------------------------------------------------------------
 # 4. Expected Wait Time & Capital Efficiency Modeling
 # ---------------------------------------------------------------------------
+
 
 def test_expected_wait_time_with_queue_depth_and_velocity():
     # Velocity V = 24 sales/day = 1.0 sales/hour
@@ -203,6 +207,7 @@ def test_expected_wait_time_empirical_median_time_to_sell(phase5_db):
 # ---------------------------------------------------------------------------
 # 5. HIGH Confidence Rule Requires Profit on Quick-Sale Value
 # ---------------------------------------------------------------------------
+
 
 def test_high_rule_requires_quick_sale_profit():
     cfg = Settings(

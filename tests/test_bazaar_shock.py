@@ -1,7 +1,7 @@
 """Tests for Bazaar Price Shock Guard (Phase 6)."""
 
 import time
-import pytest
+
 from src.bazaar import BazaarCache
 from src.config import Settings
 from src.craft_evaluator import calculate_craft_cost
@@ -132,25 +132,33 @@ def test_craft_cost_aborts_on_ingredient_price_shock():
     # SUPER_COMPACTOR_3000 recipe: ENCHANTED_COBBLESTONE x 448, ENCHANTED_REDSTONE_BLOCK x 1
     # Seed normal prices
     for _ in range(4):
-        bazaar.record_snapshot({
+        bazaar.record_snapshot(
+            {
+                "ENCHANTED_COBBLESTONE": 1_000,
+                "ENCHANTED_REDSTONE_BLOCK": 40_000,
+            },
+            timestamp=now,
+        )
+
+    bazaar.set_mock_prices(
+        {
             "ENCHANTED_COBBLESTONE": 1_000,
             "ENCHANTED_REDSTONE_BLOCK": 40_000,
-        }, timestamp=now)
-
-    bazaar.set_mock_prices({
-        "ENCHANTED_COBBLESTONE": 1_000,
-        "ENCHANTED_REDSTONE_BLOCK": 40_000,
-    })
+        }
+    )
 
     # Normal craft cost should succeed: 448 * 1,000 + 40,000 = 488,000
     cost = calculate_craft_cost("SUPER_COMPACTOR_3000", bazaar)
     assert cost == 488_000
 
     # Now shock ENCHANTED_COBBLESTONE to 2,000 (+100%)
-    bazaar.set_mock_prices({
-        "ENCHANTED_COBBLESTONE": 2_000,
-        "ENCHANTED_REDSTONE_BLOCK": 40_000,
-    }, timestamp=now)
+    bazaar.set_mock_prices(
+        {
+            "ENCHANTED_COBBLESTONE": 2_000,
+            "ENCHANTED_REDSTONE_BLOCK": 40_000,
+        },
+        timestamp=now,
+    )
 
     # With shock guard enabled, calculate_craft_cost should return None
     shocked_cost = calculate_craft_cost("SUPER_COMPACTOR_3000", bazaar)

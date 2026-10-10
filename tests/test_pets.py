@@ -8,17 +8,17 @@ import base64
 import io
 import json
 from typing import Any
+
 import nbtlib
 import pytest
 
 from src.bazaar import BazaarCache
 from src.config import Settings
 from src.constants.pet_levels import (
+    GDRAG_MAX_XP,
     calculate_pet_level,
     get_pet_held_item_info,
     get_pet_level_premium,
-    GDRAG_MAX_XP,
-    PET_MAX_XP,
 )
 from src.evaluator import FlipEvaluator, FlipResult
 from src.nbt_decoder import decode_item_bytes
@@ -46,18 +46,28 @@ def make_synthetic_pet_nbt(
         "petInfo": nbtlib.String(pet_json_str),
     }
 
-    tag = nbtlib.Compound({
-        "i": nbtlib.List[nbtlib.Compound]([
-            nbtlib.Compound({
-                "id": nbtlib.Short(397),
-                "Count": nbtlib.Byte(1),
-                "tag": nbtlib.Compound({
-                    "display": nbtlib.Compound({"Name": nbtlib.String(f"§7[Lvl 100] §6{pet_type.title()}")}),
-                    "ExtraAttributes": nbtlib.Compound(extra_fields),
-                }),
-            })
-        ])
-    })
+    tag = nbtlib.Compound(
+        {
+            "i": nbtlib.List[nbtlib.Compound](
+                [
+                    nbtlib.Compound(
+                        {
+                            "id": nbtlib.Short(397),
+                            "Count": nbtlib.Byte(1),
+                            "tag": nbtlib.Compound(
+                                {
+                                    "display": nbtlib.Compound(
+                                        {"Name": nbtlib.String(f"§7[Lvl 100] §6{pet_type.title()}")}
+                                    ),
+                                    "ExtraAttributes": nbtlib.Compound(extra_fields),
+                                }
+                            ),
+                        }
+                    )
+                ]
+            )
+        }
+    )
     nbt_file = nbtlib.File(tag)
     buf = io.BytesIO()
     nbt_file.save(buf, gzipped=True)

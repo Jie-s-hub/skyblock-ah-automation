@@ -125,6 +125,7 @@ calculate_net_revenue = net_revenue
 
 class BestResaleResult(NamedTuple):
     """Result container for tax cliff optimized resale."""
+
     net_revenue: int
     list_price: int
 
@@ -168,6 +169,7 @@ def best_resale_net(
 # ---------------------------------------------------------------------------
 # Compatibility & Legacy Wrappers
 # ---------------------------------------------------------------------------
+
 
 class AHFeeBreakdown(TypedDict):
     listing_fee: int

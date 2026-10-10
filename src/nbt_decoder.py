@@ -286,9 +286,7 @@ def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, An
                     if pet_held_item in ("NONE", "NULL", ""):
                         pet_held_item = ""
                     skin_raw = str(
-                        pet_data.get("skin", "")
-                        or extra_attrs.get("pet_skin", "")
-                        or extra_attrs.get("skin", "")
+                        pet_data.get("skin", "") or extra_attrs.get("pet_skin", "") or extra_attrs.get("skin", "")
                     ).strip()
                     if skin_raw and skin_raw.upper() not in ("NONE", "NULL", ""):
                         pet_skin = skin_raw
@@ -374,7 +372,9 @@ def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, An
         drill_part_engine = str(extra_attrs.get("drill_part_engine", "")).strip() or None
         drill_part_fuel_tank = str(extra_attrs.get("drill_part_fuel_tank", "")).strip() or None
         drill_part_upgrade_module = str(extra_attrs.get("drill_part_upgrade_module", "")).strip() or None
-        talisman_enrichment = str(extra_attrs.get("talisman_enrichment") or extra_attrs.get("enrichment") or "").strip() or None
+        talisman_enrichment = (
+            str(extra_attrs.get("talisman_enrichment") or extra_attrs.get("enrichment") or "").strip() or None
+        )
 
         prestige_tier = get_prestige_tier(internal_id)
         item_uuid = str(extra_attrs.get("uuid", "")).strip() or None

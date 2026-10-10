@@ -85,51 +85,61 @@ async def run_e2e_verification() -> None:
 
     # High-velocity progression staple: NECRON_CHESTPLATE (12 sales in last 6 hours)
     for i in range(12):
-        ended_auctions.append({
-            "auction_id": f"ended_necron_{i}",
-            "buyer": f"buyer_necron_{i}",
-            "bin": True,
-            "timestamp": int((now - (i * 1800)) * 1000),
-            "internal_id": "NECRON_CHESTPLATE",
-        })
+        ended_auctions.append(
+            {
+                "auction_id": f"ended_necron_{i}",
+                "buyer": f"buyer_necron_{i}",
+                "bin": True,
+                "timestamp": int((now - (i * 1800)) * 1000),
+                "internal_id": "NECRON_CHESTPLATE",
+            }
+        )
 
     # High-velocity progression staple: LIVID_DAGGER (15 sales in last 5 hours)
     for i in range(15):
-        ended_auctions.append({
-            "auction_id": f"ended_livid_{i}",
-            "buyer": f"buyer_livid_{i}",
-            "bin": True,
-            "timestamp": int((now - (i * 1200)) * 1000),
-            "internal_id": "LIVID_DAGGER",
-        })
+        ended_auctions.append(
+            {
+                "auction_id": f"ended_livid_{i}",
+                "buyer": f"buyer_livid_{i}",
+                "bin": True,
+                "timestamp": int((now - (i * 1200)) * 1000),
+                "internal_id": "LIVID_DAGGER",
+            }
+        )
 
     # High-velocity core weapon: RUNAAN_BOW (10 sales in last 5 hours)
     for i in range(10):
-        ended_auctions.append({
-            "auction_id": f"ended_runaan_{i}",
-            "buyer": f"buyer_runaan_{i}",
-            "bin": True,
-            "timestamp": int((now - (i * 1800)) * 1000),
-            "internal_id": "RUNAAN_BOW",
-        })
+        ended_auctions.append(
+            {
+                "auction_id": f"ended_runaan_{i}",
+                "buyer": f"buyer_runaan_{i}",
+                "bin": True,
+                "timestamp": int((now - (i * 1800)) * 1000),
+                "internal_id": "RUNAAN_BOW",
+            }
+        )
 
     # High-velocity cosmetic items (to demonstrate cosmetic filter drops them despite high velocity)
     for i in range(8):
-        ended_auctions.append({
-            "auction_id": f"ended_yeti_skin_{i}",
-            "buyer": f"buyer_yeti_{i}",
-            "bin": True,
-            "timestamp": int((now - (i * 2000)) * 1000),
-            "internal_id": "PET_SKIN_BABY_YETI_ICE",
-        })
+        ended_auctions.append(
+            {
+                "auction_id": f"ended_yeti_skin_{i}",
+                "buyer": f"buyer_yeti_{i}",
+                "bin": True,
+                "timestamp": int((now - (i * 2000)) * 1000),
+                "internal_id": "PET_SKIN_BABY_YETI_ICE",
+            }
+        )
     for i in range(8):
-        ended_auctions.append({
-            "auction_id": f"ended_dye_{i}",
-            "buyer": f"buyer_dye_{i}",
-            "bin": True,
-            "timestamp": int((now - (i * 2000)) * 1000),
-            "internal_id": "DYE_NECRON",
-        })
+        ended_auctions.append(
+            {
+                "auction_id": f"ended_dye_{i}",
+                "buyer": f"buyer_dye_{i}",
+                "bin": True,
+                "timestamp": int((now - (i * 2000)) * 1000),
+                "internal_id": "DYE_NECRON",
+            }
+        )
 
     recorded = velocity_tracker.record_ended_auctions(ended_auctions)
     assert recorded == len(ended_auctions), f"Expected {len(ended_auctions)} sales recorded, got {recorded}"
@@ -140,49 +150,111 @@ async def run_e2e_verification() -> None:
     obsidian_vel = velocity_tracker.get_daily_velocity("OBSIDIAN_CHESTPLATE")
 
     print(f"  -> Recorded {recorded} sales across tracked items.")
-    print(f"  -> NECRON_CHESTPLATE velocity: {necron_vel:.1f} sales/day (sufficient: {velocity_tracker.is_velocity_sufficient('NECRON_CHESTPLATE')})")
-    print(f"  -> LIVID_DAGGER velocity:      {livid_vel:.1f} sales/day (sufficient: {velocity_tracker.is_velocity_sufficient('LIVID_DAGGER')})")
-    print(f"  -> RUNAAN_BOW velocity:         {runaan_vel:.1f} sales/day (sufficient: {velocity_tracker.is_velocity_sufficient('RUNAAN_BOW')})")
-    print(f"  -> OBSIDIAN_CHESTPLATE velocity:{obsidian_vel:.1f} sales/day (sufficient: {velocity_tracker.is_velocity_sufficient('OBSIDIAN_CHESTPLATE')})")
+    print(
+        f"  -> NECRON_CHESTPLATE velocity: {necron_vel:.1f} sales/day (sufficient: {velocity_tracker.is_velocity_sufficient('NECRON_CHESTPLATE')})"
+    )
+    print(
+        f"  -> LIVID_DAGGER velocity:      {livid_vel:.1f} sales/day (sufficient: {velocity_tracker.is_velocity_sufficient('LIVID_DAGGER')})"
+    )
+    print(
+        f"  -> RUNAAN_BOW velocity:         {runaan_vel:.1f} sales/day (sufficient: {velocity_tracker.is_velocity_sufficient('RUNAAN_BOW')})"
+    )
+    print(
+        f"  -> OBSIDIAN_CHESTPLATE velocity:{obsidian_vel:.1f} sales/day (sufficient: {velocity_tracker.is_velocity_sufficient('OBSIDIAN_CHESTPLATE')})"
+    )
 
     assert velocity_tracker.is_velocity_sufficient("NECRON_CHESTPLATE") is True
     assert velocity_tracker.is_velocity_sufficient("LIVID_DAGGER") is True
     assert velocity_tracker.is_velocity_sufficient("RUNAAN_BOW") is True
-    assert velocity_tracker.is_velocity_sufficient("OBSIDIAN_CHESTPLATE") is False, "0-sales item must not be sufficient"
+    assert velocity_tracker.is_velocity_sufficient("OBSIDIAN_CHESTPLATE") is False, (
+        "0-sales item must not be sufficient"
+    )
 
     # 4. Ingest Active Market Listings into Evaluator Cache
     print("\n[Step 4] Updating Evaluator Market Cache with Active Listings...")
     market_batch: list[tuple[dict[str, Any], dict[str, Any]]] = [
         # Necron's Chestplate: buy 40M, resell 45M (net profit 4.1M, margin 10.25%)
-        ({"starting_bid": 40_000_000, "uuid": "necron_candidate"}, {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"}),
-        ({"starting_bid": 45_000_000, "uuid": "necron_resell_1"}, {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"}),
-        ({"starting_bid": 46_000_000, "uuid": "necron_resell_2"}, {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"}),
-        ({"starting_bid": 48_000_000, "uuid": "necron_resell_3"}, {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"}),
-
+        (
+            {"starting_bid": 40_000_000, "uuid": "necron_candidate"},
+            {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"},
+        ),
+        (
+            {"starting_bid": 45_000_000, "uuid": "necron_resell_1"},
+            {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"},
+        ),
+        (
+            {"starting_bid": 46_000_000, "uuid": "necron_resell_2"},
+            {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"},
+        ),
+        (
+            {"starting_bid": 48_000_000, "uuid": "necron_resell_3"},
+            {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"},
+        ),
         # Livid Dagger: buy 7M, resell 9.5M (net profit 2.31M, margin 33.0%)
-        ({"starting_bid": 7_000_000, "uuid": "livid_candidate"}, {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"}),
-        ({"starting_bid": 9_500_000, "uuid": "livid_resell_1"}, {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"}),
-        ({"starting_bid": 9_800_000, "uuid": "livid_resell_2"}, {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"}),
-
+        (
+            {"starting_bid": 7_000_000, "uuid": "livid_candidate"},
+            {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"},
+        ),
+        (
+            {"starting_bid": 9_500_000, "uuid": "livid_resell_1"},
+            {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"},
+        ),
+        (
+            {"starting_bid": 9_800_000, "uuid": "livid_resell_2"},
+            {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"},
+        ),
         # Runaan's Bow: buy 5M, resell 7M (net profit 1.86M, margin 37.2%)
-        ({"starting_bid": 5_000_000, "uuid": "runaan_candidate"}, {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"}),
-        ({"starting_bid": 7_000_000, "uuid": "runaan_resell_1"}, {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"}),
-        ({"starting_bid": 7_200_000, "uuid": "runaan_resell_2"}, {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"}),
-
+        (
+            {"starting_bid": 5_000_000, "uuid": "runaan_candidate"},
+            {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"},
+        ),
+        (
+            {"starting_bid": 7_000_000, "uuid": "runaan_resell_1"},
+            {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"},
+        ),
+        (
+            {"starting_bid": 7_200_000, "uuid": "runaan_resell_2"},
+            {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"},
+        ),
         # Zero-velocity item: OBSIDIAN_CHESTPLATE (buy 2M, resell 6M -> apparent margin 194%, but 0 sales)
-        ({"starting_bid": 2_000_000, "uuid": "obsidian_candidate"}, {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"}),
-        ({"starting_bid": 6_000_000, "uuid": "obsidian_resell_1"}, {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"}),
-        ({"starting_bid": 6_500_000, "uuid": "obsidian_resell_2"}, {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"}),
-
+        (
+            {"starting_bid": 2_000_000, "uuid": "obsidian_candidate"},
+            {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"},
+        ),
+        (
+            {"starting_bid": 6_000_000, "uuid": "obsidian_resell_1"},
+            {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"},
+        ),
+        (
+            {"starting_bid": 6_500_000, "uuid": "obsidian_resell_2"},
+            {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"},
+        ),
         # Cosmetic Bait: PET_SKIN_BABY_YETI_ICE (buy 10M, resell 30M -> huge margin bait)
-        ({"starting_bid": 10_000_000, "uuid": "yeti_skin_candidate"}, {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"}),
-        ({"starting_bid": 30_000_000, "uuid": "yeti_skin_resell_1"}, {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"}),
-        ({"starting_bid": 35_000_000, "uuid": "yeti_skin_resell_2"}, {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"}),
-
+        (
+            {"starting_bid": 10_000_000, "uuid": "yeti_skin_candidate"},
+            {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"},
+        ),
+        (
+            {"starting_bid": 30_000_000, "uuid": "yeti_skin_resell_1"},
+            {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"},
+        ),
+        (
+            {"starting_bid": 35_000_000, "uuid": "yeti_skin_resell_2"},
+            {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"},
+        ),
         # Cosmetic Dye: DYE_NECRON (buy 50M, resell 150M -> huge margin bait)
-        ({"starting_bid": 50_000_000, "uuid": "dye_candidate"}, {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"}),
-        ({"starting_bid": 150_000_000, "uuid": "dye_resell_1"}, {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"}),
-        ({"starting_bid": 160_000_000, "uuid": "dye_resell_2"}, {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"}),
+        (
+            {"starting_bid": 50_000_000, "uuid": "dye_candidate"},
+            {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"},
+        ),
+        (
+            {"starting_bid": 150_000_000, "uuid": "dye_resell_1"},
+            {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"},
+        ),
+        (
+            {"starting_bid": 160_000_000, "uuid": "dye_resell_2"},
+            {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"},
+        ),
     ]
 
     evaluator.update_cache(market_batch)
@@ -237,7 +309,9 @@ async def run_e2e_verification() -> None:
     assert res_necron.staple_category == "WITHER_ARMOR", "Staple category must be WITHER_ARMOR"
     assert 8.0 <= res_necron.margin_pct < 15.0, f"Expected margin in [8.0%, 15.0%), got {res_necron.margin_pct}%"
     assert res_necron.net_profit == 4_100_000, f"Expected 4,100,000 coins profit, got {res_necron.net_profit}"
-    print(f"  [PASS] Scenario 4: Progression staple Wither armor (NECRON_CHESTPLATE) accepted at {res_necron.margin_pct:.2f}% margin (relaxed threshold >= 8.0%, standard threshold >= 15.0%).")
+    print(
+        f"  [PASS] Scenario 4: Progression staple Wither armor (NECRON_CHESTPLATE) accepted at {res_necron.margin_pct:.2f}% margin (relaxed threshold >= 8.0%, standard threshold >= 15.0%)."
+    )
 
     # Scenario 5: Midgame progression staple (LIVID_DAGGER)
     livid_auction = {"starting_bid": 7_000_000, "uuid": "livid_candidate"}
@@ -252,7 +326,9 @@ async def run_e2e_verification() -> None:
     assert res_livid is not None, "Livid Dagger must qualify"
     assert res_livid.is_priority is True, "Livid Dagger must be flagged is_priority=True"
     assert res_livid.staple_category == "MIDGAME_COMBAT", "Staple category must be MIDGAME_COMBAT"
-    print(f"  [PASS] Scenario 5: Midgame progression staple (LIVID_DAGGER) accepted with category {res_livid.staple_category}.")
+    print(
+        f"  [PASS] Scenario 5: Midgame progression staple (LIVID_DAGGER) accepted with category {res_livid.staple_category}."
+    )
 
     # Scenario 6: Core weapon (RUNAAN_BOW) preserved and not dropped
     runaan_auction = {"starting_bid": 5_000_000, "uuid": "runaan_candidate"}
@@ -263,13 +339,17 @@ async def run_e2e_verification() -> None:
         "rarity_upgrades": 0,
         "enchantments": {"power": 5, "aiming": 5},
     }
-    assert evaluator.is_blacklisted_cosmetic("RUNAAN_BOW", "Runaan's Bow") is False, "RUNAAN_BOW must not be blacklisted"
+    assert evaluator.is_blacklisted_cosmetic("RUNAAN_BOW", "Runaan's Bow") is False, (
+        "RUNAAN_BOW must not be blacklisted"
+    )
     res_runaan = evaluator.evaluate_listing(runaan_auction, runaan_decoded)
     assert res_runaan is not None, "Runaan's Bow must qualify"
     assert res_runaan.is_priority is False, "Standard item must not have priority"
     assert res_runaan.staple_category is None, "Standard item must have staple_category=None"
     assert res_runaan.margin_pct >= 15.0, "Standard item requires >= 15.0% margin"
-    print(f"  [PASS] Scenario 6: Core weapon (RUNAAN_BOW) preserved as standard flip ({res_runaan.margin_pct:.1f}% margin).")
+    print(
+        f"  [PASS] Scenario 6: Core weapon (RUNAAN_BOW) preserved as standard flip ({res_runaan.margin_pct:.1f}% margin)."
+    )
 
     # 6. Embed Payload Styling Validation
     print("\n[Step 6] Validating Discord Embed Styling and Visual Attributes...")
@@ -281,7 +361,9 @@ async def run_e2e_verification() -> None:
     priority_field = next((f for f in necron_embed["fields"] if f["name"] == "⚡ Priority Classification"), None)
     assert priority_field is not None, "Priority classification field must exist in embed"
     assert "WITHER_ARMOR" in priority_field["value"]
-    print("  -> Necron's Chestplate embed styling verified: Flame title, color 0xFF9900, priority classification field.")
+    print(
+        "  -> Necron's Chestplate embed styling verified: Flame title, color 0xFF9900, priority classification field."
+    )
 
     # Check Livid Dagger embed
     livid_embed = notifier.build_embed_payload(res_livid)["embeds"][0]

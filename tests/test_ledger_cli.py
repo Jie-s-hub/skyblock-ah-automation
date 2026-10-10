@@ -1,6 +1,7 @@
 """Unit and CLI integration tests for scripts/ledger_cli.py."""
 
 from pathlib import Path
+
 import pytest
 
 from scripts.ledger_cli import main
@@ -43,7 +44,9 @@ def test_cli_mark_bought_explicit_price(cli_db: tuple[DatabaseManager, str], cap
     """Test mark-bought with manual --price when alert does not exist."""
     manager, db_file = cli_db
 
-    exit_code = main(["--db", db_file, "mark-bought", "manual-uuid-2", "--price", "15000000", "--notes", "Manual snipe"])
+    exit_code = main(
+        ["--db", db_file, "mark-bought", "manual-uuid-2", "--price", "15000000", "--notes", "Manual snipe"]
+    )
     assert exit_code == 0
 
     purchase = manager.get_purchase("manual-uuid-2")

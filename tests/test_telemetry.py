@@ -75,6 +75,7 @@ def test_json_log_formatter_with_exception():
         raise ValueError("Simulated pipeline error")
     except ValueError:
         import sys
+
         exc_info = sys.exc_info()
 
     record = logging.LogRecord(

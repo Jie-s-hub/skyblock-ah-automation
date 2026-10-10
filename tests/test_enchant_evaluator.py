@@ -7,8 +7,6 @@ import pytest
 from src.bazaar import BazaarCache
 from src.config import Settings
 from src.enchant_evaluator import (
-    PROGRESSION_ENCHANTS,
-    HIGH_TIER_COMPOUND_ENCHANTS,
     get_enchant_bazaar_cost,
     get_enchant_bazaar_price,
 )
@@ -27,14 +25,17 @@ def bz_cache() -> BazaarCache:
 # 1. Progression Enchants (Champion, Compact, Cultivating, Expertise, Hecatomb)
 # ---------------------------------------------------------------------------
 
+
 def test_champion_10_progression_no_multiplier(bz_cache: BazaarCache):
     """
     Champion 10 with Champion 1 priced at 4,000,000 returns exactly 4,000,000.
     Must NOT apply 2^(10 - 1) = 512x multiplier to produce 2,048,000,000.
     """
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_CHAMPION_1": 4_000_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_CHAMPION_1": 4_000_000,
+        }
+    )
 
     # Test via get_enchant_bazaar_price
     price = get_enchant_bazaar_price(bz_cache, "champion", 10)
@@ -55,9 +56,11 @@ def test_champion_10_progression_no_multiplier(bz_cache: BazaarCache):
 def test_all_progression_enchants_resolve_to_tier_1_price(bz_cache: BazaarCache, ench_name: str):
     """All progression enchants level through player activity; level 10 resolves strictly to 1 * Tier 1."""
     prod_id = f"ENCHANTMENT_{ench_name.upper()}_1"
-    bz_cache.set_mock_prices({
-        prod_id: 1_500_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            prod_id: 1_500_000,
+        }
+    )
 
     price_lvl_10 = get_enchant_bazaar_price(bz_cache, ench_name, 10)
     assert price_lvl_10 == 1_500_000
@@ -80,14 +83,17 @@ def test_progression_enchant_missing_tier_1_returns_zero(bz_cache: BazaarCache):
 # 2. Exact Tier Direct Lookup (No Double Multiplication)
 # ---------------------------------------------------------------------------
 
+
 def test_ultimate_wise_5_direct_bazaar_no_double_multiplication(bz_cache: BazaarCache):
     """
     Ultimate Wise 5 returns the direct Bazaar price of Tier 5 without being multiplied by 5 or 16.
     """
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_ULTIMATE_WISE_5": 2_000_000,
-        "ENCHANTMENT_ULTIMATE_WISE_1": 150_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_ULTIMATE_WISE_5": 2_000_000,
+            "ENCHANTMENT_ULTIMATE_WISE_1": 150_000,
+        }
+    )
 
     # When Tier 5 exists, it must return 2,000,000 directly
     price = get_enchant_bazaar_price(bz_cache, "ultimate_wise", 5)
@@ -102,10 +108,12 @@ def test_ultimate_wise_5_direct_bazaar_no_double_multiplication(bz_cache: Bazaar
 
 def test_legion_5_direct_bazaar_price(bz_cache: BazaarCache):
     """Legion 5 present on Bazaar returns direct Tier 5 price."""
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_ULTIMATE_LEGION_5": 30_000_000,
-        "ENCHANTMENT_ULTIMATE_LEGION_1": 5_000_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_ULTIMATE_LEGION_5": 30_000_000,
+            "ENCHANTMENT_ULTIMATE_LEGION_1": 5_000_000,
+        }
+    )
 
     price = get_enchant_bazaar_price(bz_cache, "legion", 5)
     assert price == 30_000_000
@@ -115,15 +123,18 @@ def test_legion_5_direct_bazaar_price(bz_cache: BazaarCache):
 # 3. High-Tier Compounding (T6 to T7)
 # ---------------------------------------------------------------------------
 
+
 def test_growth_7_compounds_from_tier_6(bz_cache: BazaarCache):
     """
     Growth 7 compounds as 2 * Growth 6 price when Growth 7 is missing from Bazaar.
     Must NOT compound as 64 * Growth 1.
     """
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_GROWTH_6": 12_000_000,
-        "ENCHANTMENT_GROWTH_1": 100_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_GROWTH_6": 12_000_000,
+            "ENCHANTMENT_GROWTH_1": 100_000,
+        }
+    )
 
     # Growth 7 is missing: compounds as 2 * 12,000,000 = 24,000,000
     price = get_enchant_bazaar_price(bz_cache, "growth", 7)
@@ -141,10 +152,12 @@ def test_all_high_tier_enchants_compound_tier_7_from_tier_6(bz_cache: BazaarCach
     """High-tier enchants (T6 to T7) compound strictly as 2 * Price(Tier 6)."""
     t6_prod = f"ENCHANTMENT_{ench_name.upper()}_6"
     t1_prod = f"ENCHANTMENT_{ench_name.upper()}_1"
-    bz_cache.set_mock_prices({
-        t6_prod: 15_000_000,
-        t1_prod: 50_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            t6_prod: 15_000_000,
+            t1_prod: 50_000,
+        }
+    )
 
     price = get_enchant_bazaar_price(bz_cache, ench_name, 7)
     assert price == 30_000_000  # 2 * 15M
@@ -152,10 +165,12 @@ def test_all_high_tier_enchants_compound_tier_7_from_tier_6(bz_cache: BazaarCach
 
 def test_growth_7_exact_match_preferred_if_present(bz_cache: BazaarCache):
     """If Growth 7 is explicitly listed in Bazaar, its exact price is used directly."""
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_GROWTH_7": 28_000_000,
-        "ENCHANTMENT_GROWTH_6": 12_000_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_GROWTH_7": 28_000_000,
+            "ENCHANTMENT_GROWTH_6": 12_000_000,
+        }
+    )
 
     price = get_enchant_bazaar_price(bz_cache, "growth", 7)
     assert price == 28_000_000
@@ -165,6 +180,7 @@ def test_growth_7_exact_match_preferred_if_present(bz_cache: BazaarCache):
 # 4. Standard Anvil Compounding Fallback
 # ---------------------------------------------------------------------------
 
+
 def test_anvil_fallback_tier_4_compounding(bz_cache: BazaarCache):
     """
     Anvil fallback for a missing Tier 4 book compounds correctly:
@@ -172,27 +188,33 @@ def test_anvil_fallback_tier_4_compounding(bz_cache: BazaarCache):
     - 8 * Tier 1 when Tier 1 is the highest available base tier (T3 and T2 missing).
     """
     # Scenario A: Missing Tier 4, Tier 3 available at 1,000,000
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_SMITE_3": 1_000_000,
-        "ENCHANTMENT_SMITE_1": 100_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_SMITE_3": 1_000_000,
+            "ENCHANTMENT_SMITE_1": 100_000,
+        }
+    )
     # Highest available B < 4 is B=3: 2^(4 - 3) * 1,000,000 = 2 * 1,000,000 = 2,000,000
     price_from_t3 = get_enchant_bazaar_price(bz_cache, "smite", 4)
     assert price_from_t3 == 2_000_000
 
     # Scenario B: Missing Tier 4, 3, 2; Tier 1 available at 100,000
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_SMITE_1": 100_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_SMITE_1": 100_000,
+        }
+    )
     # Highest available B < 4 is B=1: 2^(4 - 1) * 100,000 = 8 * 100,000 = 800,000
     price_from_t1 = get_enchant_bazaar_price(bz_cache, "smite", 4)
     assert price_from_t1 == 800_000
 
     # Scenario C: Missing Tier 4, 3; Tier 2 available at 250,000
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_SMITE_2": 250_000,
-        "ENCHANTMENT_SMITE_1": 100_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_SMITE_2": 250_000,
+            "ENCHANTMENT_SMITE_1": 100_000,
+        }
+    )
     # Highest available B < 4 is B=2: 2^(4 - 2) * 250,000 = 4 * 250,000 = 1,000,000
     price_from_t2 = get_enchant_bazaar_price(bz_cache, "smite", 4)
     assert price_from_t2 == 1_000_000
@@ -202,14 +224,17 @@ def test_anvil_fallback_tier_4_compounding(bz_cache: BazaarCache):
 # 5. Integration with Networth Item Addon Calculation
 # ---------------------------------------------------------------------------
 
+
 def test_networth_integration_progression_champion_10(bz_cache: BazaarCache):
     """
     An item with Champion 10 should produce an addon item costing 4,000,000 coins,
     not 2,048,000,000 coins.
     """
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_CHAMPION_1": 4_000_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_CHAMPION_1": 4_000_000,
+        }
+    )
 
     decoded = {
         "internal_id": "REAPER_FALCHION",
@@ -230,10 +255,12 @@ def test_networth_integration_growth_7_high_tier(bz_cache: BazaarCache):
     """
     An item with Growth 7 should compound from Growth 6 (2 * 12M = 24M).
     """
-    bz_cache.set_mock_prices({
-        "ENCHANTMENT_GROWTH_6": 12_000_000,
-        "ENCHANTMENT_GROWTH_1": 100_000,
-    })
+    bz_cache.set_mock_prices(
+        {
+            "ENCHANTMENT_GROWTH_6": 12_000_000,
+            "ENCHANTMENT_GROWTH_1": 100_000,
+        }
+    )
 
     decoded = {
         "internal_id": "NECRON_CHESTPLATE",
@@ -253,6 +280,7 @@ def test_networth_integration_growth_7_high_tier(bz_cache: BazaarCache):
 # ---------------------------------------------------------------------------
 # 6. Edge Cases & Calling Patterns
 # ---------------------------------------------------------------------------
+
 
 def test_edge_cases_none_cache_or_invalid_tier():
     """Verify safe zero returns when cache is None or tier <= 0."""

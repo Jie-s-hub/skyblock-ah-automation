@@ -7,21 +7,19 @@ from __future__ import annotations
 import base64
 import io
 from typing import Any
+
 import nbtlib
 import pytest
 
-from src.bazaar import BazaarCache, MASTER_STAR_PRODUCT_IDS
+from src.bazaar import BazaarCache
 from src.config import Settings
 from src.evaluator import FlipEvaluator, FlipResult
 from src.nbt_decoder import (
     decode_item_bytes,
     parse_slotted_gemstones,
-    VALID_GEM_QUALITIES,
-    VALID_GEM_TYPES,
 )
 from src.networth_evaluator import (
     calculate_item_addons,
-    calculate_item_networth,
     get_dynamic_retention_rate,
 )
 from src.notifier import DiscordNotifier
@@ -48,26 +46,30 @@ def make_synthetic_nbt_with_gemstones(
     }
 
     if gems:
-        extra_fields["gems"] = nbtlib.Compound({
-            k: nbtlib.String(v) for k, v in gems.items()
-        })
+        extra_fields["gems"] = nbtlib.Compound({k: nbtlib.String(v) for k, v in gems.items()})
 
-    extra_fields["enchantments"] = nbtlib.Compound({
-        k: nbtlib.Int(v) for k, v in enchantments.items()
-    })
+    extra_fields["enchantments"] = nbtlib.Compound({k: nbtlib.Int(v) for k, v in enchantments.items()})
 
-    tag = nbtlib.Compound({
-        "i": nbtlib.List[nbtlib.Compound]([
-            nbtlib.Compound({
-                "id": nbtlib.Short(261),
-                "Count": nbtlib.Byte(1),
-                "tag": nbtlib.Compound({
-                    "display": nbtlib.Compound({"Name": nbtlib.String(name)}),
-                    "ExtraAttributes": nbtlib.Compound(extra_fields),
-                }),
-            })
-        ])
-    })
+    tag = nbtlib.Compound(
+        {
+            "i": nbtlib.List[nbtlib.Compound](
+                [
+                    nbtlib.Compound(
+                        {
+                            "id": nbtlib.Short(261),
+                            "Count": nbtlib.Byte(1),
+                            "tag": nbtlib.Compound(
+                                {
+                                    "display": nbtlib.Compound({"Name": nbtlib.String(name)}),
+                                    "ExtraAttributes": nbtlib.Compound(extra_fields),
+                                }
+                            ),
+                        }
+                    )
+                ]
+            )
+        }
+    )
     nbt_file = nbtlib.File(tag)
     buf = io.BytesIO()
     nbt_file.save(buf, gzipped=True)
@@ -77,6 +79,7 @@ def make_synthetic_nbt_with_gemstones(
 # ============================================================================
 # 1. DYNAMIC RETENTION ENGINE TESTS
 # ============================================================================
+
 
 def test_dynamic_retention_rate_thresholds():
     """Verify tier-based dynamic retention rates across boundaries."""
@@ -99,6 +102,7 @@ def test_dynamic_retention_rate_thresholds():
 # ============================================================================
 # 2. MASTER STAR (STARS 6-10) PARSING & PRICING TESTS
 # ============================================================================
+
 
 def test_master_star_extraction_from_nbt():
     """Verify stars 6-10 correctly map to master stars 1-5."""
@@ -130,13 +134,15 @@ def test_master_star_extraction_from_nbt():
 def test_bazaar_master_star_pricing():
     """Verify BazaarCache master star pricing and compounding."""
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "FIRST_MASTER_STAR": 5_000_000,
-        "SECOND_MASTER_STAR": 12_000_000,
-        "THIRD_MASTER_STAR": 25_000_000,
-        "FOURTH_MASTER_STAR": 45_000_000,
-        "FIFTH_MASTER_STAR": 80_000_000,
-    })
+    cache.set_mock_prices(
+        {
+            "FIRST_MASTER_STAR": 5_000_000,
+            "SECOND_MASTER_STAR": 12_000_000,
+            "THIRD_MASTER_STAR": 25_000_000,
+            "FOURTH_MASTER_STAR": 45_000_000,
+            "FIFTH_MASTER_STAR": 80_000_000,
+        }
+    )
 
     assert cache.get_master_star_price(1) == 5_000_000
     assert cache.get_master_star_price(2) == 12_000_000
@@ -165,6 +171,7 @@ def test_bazaar_master_star_pricing():
 # ============================================================================
 # 3. SLOTTED GEMSTONE EXTRACTION & PRICING TESTS
 # ============================================================================
+
 
 def test_parse_slotted_gemstones():
     """Verify slotted gemstone parsing handles various formats and rejects empty/locked slots."""
@@ -206,10 +213,12 @@ def test_parse_slotted_gemstones_companion_tags():
 def test_bazaar_gemstone_pricing_and_breakdown():
     """Verify gemstone pricing from Bazaar and summary formatting in addon breakdown."""
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "PERFECT_JASPER_GEM": 18_000_000,
-        "FLAWLESS_RUBY_GEM": 4_000_000,
-    })
+    cache.set_mock_prices(
+        {
+            "PERFECT_JASPER_GEM": 18_000_000,
+            "FLAWLESS_RUBY_GEM": 4_000_000,
+        }
+    )
 
     assert cache.get_gemstone_price("JASPER", "PERFECT") == 18_000_000
     assert cache.get_gemstone_price("RUBY", "FLAWLESS") == 4_000_000
@@ -243,6 +252,7 @@ def test_bazaar_gemstone_pricing_and_breakdown():
 # 4. END-TO-END VALUATION ENGINE WITH DYNAMIC RETENTION TESTS
 # ============================================================================
 
+
 def test_endgame_staple_valuation_85_percent_retention():
     """
     Test Endgame gear (base_lbin >= 500M):
@@ -257,14 +267,16 @@ def test_endgame_staple_valuation_85_percent_retention():
         AH_TAX_RATE=0.02,
     )
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "RECOMBOBULATOR_3000": 10_000_000,
-        "FIRST_MASTER_STAR": 5_000_000,
-        "SECOND_MASTER_STAR": 12_000_000,
-        "THIRD_MASTER_STAR": 25_000_000,
-        "PERFECT_JASPER_GEM": 18_000_000,
-        "ENCHANTMENT_OVERLOAD_5": 8_000_000,
-    })
+    cache.set_mock_prices(
+        {
+            "RECOMBOBULATOR_3000": 10_000_000,
+            "FIRST_MASTER_STAR": 5_000_000,
+            "SECOND_MASTER_STAR": 12_000_000,
+            "THIRD_MASTER_STAR": 25_000_000,
+            "PERFECT_JASPER_GEM": 18_000_000,
+            "ENCHANTMENT_OVERLOAD_5": 8_000_000,
+        }
+    )
 
     evaluator = FlipEvaluator(settings, bazaar_cache=cache)
     # Set clean price baseline for Terminator at 750,000,000 (>= 500M -> Endgame)
@@ -337,10 +349,12 @@ def test_budget_gear_valuation_50_percent_retention():
         AH_TAX_RATE=0.02,
     )
     cache = BazaarCache()
-    cache.set_mock_prices({
-        "RECOMBOBULATOR_3000": 10_000_000,
-        "FLAWLESS_RUBY_GEM": 4_000_000,
-    })
+    cache.set_mock_prices(
+        {
+            "RECOMBOBULATOR_3000": 10_000_000,
+            "FLAWLESS_RUBY_GEM": 4_000_000,
+        }
+    )
 
     evaluator = FlipEvaluator(settings, bazaar_cache=cache)
     # Clean baseline = 15,000,000 (< 50M -> Budget)

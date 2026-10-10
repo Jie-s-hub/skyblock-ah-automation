@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import base64
 import io
+from typing import Any
+
 import nbtlib
-import pytest
 
 from src.nbt_decoder import decode_item_bytes, strip_minecraft_color_codes
 
@@ -31,22 +32,28 @@ def make_synthetic_nbt(
     if upgrade_level > 0:
         extra_fields["upgrade_level"] = nbtlib.Int(upgrade_level)
 
-    extra_fields["enchantments"] = nbtlib.Compound(
-        {k: nbtlib.Int(v) for k, v in enchantments.items()}
-    )
+    extra_fields["enchantments"] = nbtlib.Compound({k: nbtlib.Int(v) for k, v in enchantments.items()})
 
-    tag = nbtlib.Compound({
-        "i": nbtlib.List[nbtlib.Compound]([
-            nbtlib.Compound({
-                "id": nbtlib.Short(276),
-                "Count": nbtlib.Byte(1),
-                "tag": nbtlib.Compound({
-                    "display": nbtlib.Compound({"Name": nbtlib.String(name)}),
-                    "ExtraAttributes": nbtlib.Compound(extra_fields),
-                }),
-            })
-        ])
-    })
+    tag = nbtlib.Compound(
+        {
+            "i": nbtlib.List[nbtlib.Compound](
+                [
+                    nbtlib.Compound(
+                        {
+                            "id": nbtlib.Short(276),
+                            "Count": nbtlib.Byte(1),
+                            "tag": nbtlib.Compound(
+                                {
+                                    "display": nbtlib.Compound({"Name": nbtlib.String(name)}),
+                                    "ExtraAttributes": nbtlib.Compound(extra_fields),
+                                }
+                            ),
+                        }
+                    )
+                ]
+            )
+        }
+    )
     nbt_file = nbtlib.File(tag)
     buf = io.BytesIO()
     nbt_file.save(buf, gzipped=True)
@@ -122,17 +129,25 @@ def test_decode_malformed_and_empty_inputs():
 
 def test_decode_missing_extra_attributes():
     """Verify safe fallback when NBT does not contain ExtraAttributes."""
-    tag = nbtlib.Compound({
-        "i": nbtlib.List[nbtlib.Compound]([
-            nbtlib.Compound({
-                "id": nbtlib.Short(1),
-                "Count": nbtlib.Byte(64),
-                "tag": nbtlib.Compound({
-                    "display": nbtlib.Compound({"Name": nbtlib.String("§fStone")}),
-                }),
-            })
-        ])
-    })
+    tag = nbtlib.Compound(
+        {
+            "i": nbtlib.List[nbtlib.Compound](
+                [
+                    nbtlib.Compound(
+                        {
+                            "id": nbtlib.Short(1),
+                            "Count": nbtlib.Byte(64),
+                            "tag": nbtlib.Compound(
+                                {
+                                    "display": nbtlib.Compound({"Name": nbtlib.String("§fStone")}),
+                                }
+                            ),
+                        }
+                    )
+                ]
+            )
+        }
+    )
     nbt_file = nbtlib.File(tag)
     buf = io.BytesIO()
     nbt_file.save(buf, gzipped=True)

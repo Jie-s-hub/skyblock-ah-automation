@@ -50,4 +50,3 @@ def test_phase_3_guard_defaults_are_enabled():
     # Verify comma-separated string parsing for shadow mode lanes
     cfg_shadow = Settings(DRY_RUN=True, SHADOW_MODE_LANES="pets,god-roll, floor ")
     assert cfg_shadow.SHADOW_MODE_LANES == ["pets", "god-roll", "floor"]
-

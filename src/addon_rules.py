@@ -63,26 +63,30 @@ def calculate_potato_book_cost(
         if hpb_price and hpb_price > 0:
             cost = int(hpb_count * hpb_price)
             total_cost += cost
-            addon_items.append({
-                "type": "hot_potato_book",
-                "name": f"Hot Potato Books ({hpb_count}/10)",
-                "cost": cost,
-                "count": hpb_count,
-                "product_ids": ["HOT_POTATO_BOOK"],
-            })
+            addon_items.append(
+                {
+                    "type": "hot_potato_book",
+                    "name": f"Hot Potato Books ({hpb_count}/10)",
+                    "cost": cost,
+                    "count": hpb_count,
+                    "product_ids": ["HOT_POTATO_BOOK"],
+                }
+            )
 
     if fpb_count > 0:
         fpb_price = bazaar_cache.get_buy_price("FUMING_POTATO_BOOK")
         if fpb_price and fpb_price > 0:
             cost = int(fpb_count * fpb_price)
             total_cost += cost
-            addon_items.append({
-                "type": "fuming_potato_book",
-                "name": f"Fuming Potato Books ({fpb_count}/5)",
-                "cost": cost,
-                "count": fpb_count,
-                "product_ids": ["FUMING_POTATO_BOOK"],
-            })
+            addon_items.append(
+                {
+                    "type": "fuming_potato_book",
+                    "name": f"Fuming Potato Books ({fpb_count}/5)",
+                    "cost": cost,
+                    "count": fpb_count,
+                    "product_ids": ["FUMING_POTATO_BOOK"],
+                }
+            )
 
     return hpb_count, fpb_count, total_cost, addon_items
 
@@ -118,12 +122,14 @@ def calculate_wither_scrolls_cost(
             if price and price > 0:
                 cost = int(price)
                 total_cost += cost
-                addon_items.append({
-                    "type": "wither_scroll",
-                    "name": display_name,
-                    "cost": cost,
-                    "product_ids": [prod_id],
-                })
+                addon_items.append(
+                    {
+                        "type": "wither_scroll",
+                        "name": display_name,
+                        "cost": cost,
+                        "product_ids": [prod_id],
+                    }
+                )
 
     return total_cost, addon_items
 
@@ -143,12 +149,14 @@ def calculate_enrichment_cost(
     price = bazaar_cache.get_buy_price(clean)
     if price and price > 0:
         cost = int(price)
-        return cost, [{
-            "type": "enrichment",
-            "name": f"Enrichment: {clean.replace('TALISMAN_ENRICHMENT_', '').title()}",
-            "cost": cost,
-            "product_ids": [clean],
-        }]
+        return cost, [
+            {
+                "type": "enrichment",
+                "name": f"Enrichment: {clean.replace('TALISMAN_ENRICHMENT_', '').title()}",
+                "cost": cost,
+                "product_ids": [clean],
+            }
+        ]
 
     return 0, []
 
@@ -172,12 +180,14 @@ def calculate_drill_parts_cost(
             if price and price > 0:
                 cost = int(price)
                 total_cost += cost
-                addon_items.append({
-                    "type": "drill_part",
-                    "name": f"Drill Part: {clean_id.replace('_', ' ').title()}",
-                    "cost": cost,
-                    "product_ids": [clean_id],
-                })
+                addon_items.append(
+                    {
+                        "type": "drill_part",
+                        "name": f"Drill Part: {clean_id.replace('_', ' ').title()}",
+                        "cost": cost,
+                        "product_ids": [clean_id],
+                    }
+                )
 
     return total_cost, addon_items
 

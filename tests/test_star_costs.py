@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.constants.reforge_stones import REFORGE_STONE_DISPLAY_NAMES, REFORGE_STONE_MAP
 from src.constants.star_costs import (
-    CRIMSON_ARMOR_STAR_COSTS,
     DEFAULT_DUNGEON_STAR_COSTS,
     WITHER_ARMOR_STAR_COSTS,
     get_star_essence_cost,

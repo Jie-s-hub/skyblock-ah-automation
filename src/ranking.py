@@ -5,11 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from src.capital_efficiency import calculate_capital_efficiency
 from src.config import Settings
 
 logger = logging.getLogger(__name__)
-
-from src.capital_efficiency import calculate_capital_efficiency
 
 
 def compute_confidence_score(flip: Any) -> tuple[float, str]:
@@ -228,4 +227,3 @@ def score_and_rank_flip(
     flip.confidence_score = conf_score
     flip.confidence_label = conf_label
     return flip
-

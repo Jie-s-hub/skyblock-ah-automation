@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
 import json
 import logging
-from pathlib import Path
 import time
+from collections import defaultdict, deque
+from pathlib import Path
 from typing import Any, Optional
 
 from src.config import Settings
@@ -155,9 +155,7 @@ class SalesVelocityTracker:
         if not internal_id or internal_id not in self.sales:
             return 0.0
 
-        w_hours = float(
-            window_hours if window_hours is not None else self.config.VELOCITY_WINDOW_HOURS
-        )
+        w_hours = float(window_hours if window_hours is not None else self.config.VELOCITY_WINDOW_HOURS)
         if w_hours <= 0:
             w_hours = 24.0
 
@@ -201,16 +199,8 @@ class SalesVelocityTracker:
         if not internal_id or internal_id not in self.sales or not self.sales[internal_id]:
             return False
 
-        min_sales = (
-            min_daily_sales
-            if min_daily_sales is not None
-            else self.config.MIN_SALES_PER_DAY
-        )
-        stale_hours = (
-            max_stale_hours
-            if max_stale_hours is not None
-            else self.config.MAX_HOURS_WITHOUT_SALE
-        )
+        min_sales = min_daily_sales if min_daily_sales is not None else self.config.MIN_SALES_PER_DAY
+        stale_hours = max_stale_hours if max_stale_hours is not None else self.config.MAX_HOURS_WITHOUT_SALE
         current_time = float(now if now is not None else time.time())
 
         # Check rolling daily velocity

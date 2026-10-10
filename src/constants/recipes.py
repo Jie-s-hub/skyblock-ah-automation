@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from src.constants.accessory_recipes import ACCESSORY_RECIPES
+
 # Mapping of craftable item internal_id -> {Bazaar Ingredient ID: Quantity}
 RECIPES: dict[str, dict[str, int]] = {
     "SUPER_COMPACTOR_3000": {
@@ -118,7 +120,6 @@ RECIPES: dict[str, dict[str, int]] = {
     "STARRED_YETI_SWORD": {"YETI_SWORD": 1, "WINTER_FRAGMENT": 8},
     "STARRED_MIDAS_STAFF": {"MIDAS_STAFF": 1, "GOLDEN_FRAGMENT": 8},
     "STARRED_MIDAS_SWORD": {"MIDAS_SWORD": 1, "GOLDEN_FRAGMENT": 8},
-
     # --- Dragon Armor Sets (8 sets x 4 pieces = 32 recipes) ---
     "SUPERIOR_DRAGON_HELMET": {"SUPERIOR_FRAGMENT": 5},
     "SUPERIOR_DRAGON_CHESTPLATE": {"SUPERIOR_FRAGMENT": 8},
@@ -152,7 +153,6 @@ RECIPES: dict[str, dict[str, int]] = {
     "HOLY_DRAGON_CHESTPLATE": {"HOLY_FRAGMENT": 8},
     "HOLY_DRAGON_LEGGINGS": {"HOLY_FRAGMENT": 7},
     "HOLY_DRAGON_BOOTS": {"HOLY_FRAGMENT": 4},
-
     # --- Slayer Weapons & Katanas ---
     "AXE_OF_THE_SHREDDED": {"REAPER_FALCHION": 1, "REV_VISCERA": 256, "SHARD_OF_THE_SHREDDED": 64},
     "REAPER_FALCHION": {"REVENANT_FALCHION": 1, "REV_VISCERA": 64},
@@ -163,7 +163,6 @@ RECIPES: dict[str, dict[str, int]] = {
     "VORPAL_KATANA": {"VOIDEDGE_KATANA": 1, "NULL_OVOID": 64, "REFINED_TITANIUM": 1},
     "ATOMSPLIT_KATANA": {"VORPAL_KATANA": 1, "NULL_BLADE": 1, "TESSELATED_ENDER_PEARL": 16},
     "SINSEEKER_SCYTHE": {"NULL_OVOID": 64, "ENCHANTED_EYE_OF_ENDER": 128},
-
     # --- Slayer Armor Sets ---
     "TARANTULA_HELMET": {"TARANTULA_SILK": 10, "ENCHANTED_IRON": 10},
     "TARANTULA_CHESTPLATE": {"TARANTULA_SILK": 16, "ENCHANTED_IRON": 16},
@@ -181,7 +180,6 @@ RECIPES: dict[str, dict[str, int]] = {
     "REVENANT_CHESTPLATE": {"REV_VISCERA": 8, "ENCHANTED_DIAMOND": 128},
     "REVENANT_LEGGINGS": {"REV_VISCERA": 7, "ENCHANTED_DIAMOND": 128},
     "REVENANT_BOOTS": {"REV_VISCERA": 4, "ENCHANTED_DIAMOND": 128},
-
     # --- Healing Wands & Combat Wands ---
     "WAND_OF_HEALING": {"ENCHANTED_MUTTON": 1},
     "WAND_OF_MENDING": {"WAND_OF_HEALING": 1, "REV_VISCERA": 2},
@@ -189,7 +187,6 @@ RECIPES: dict[str, dict[str, int]] = {
     "WAND_OF_ATONEMENT": {"WAND_OF_RESTORATION": 1, "REV_VISCERA": 128},
     "FIRE_VEIL_WAND": {"SPELL_POWDER": 16, "ENCHANTED_BLAZE_ROD": 8},
     "GYROKINETIC_WAND": {"COMB_FLUBBER": 256, "HARDENED_WOOD": 1},
-
     # --- Popular Weapons & Bows ---
     "ASPECT_OF_THE_END": {"ENCHANTED_EYE_OF_ENDER": 32, "ENCHANTED_DIAMOND": 1},
     "LEAPING_SWORD": {"ENCHANTED_FERMENTED_SPIDER_EYE": 24},
@@ -199,18 +196,15 @@ RECIPES: dict[str, dict[str, int]] = {
     "YETI_SWORD": {"HILT_OF_TRUE_ICE": 1, "ENCHANTED_PACKED_ICE": 128},
     "RUNAANS_BOW": {"ENCHANTED_BONE": 192, "ENCHANTED_STRING": 192},
     "MAGMA_BOW": {"ENCHANTED_MAGMA_CREAM": 96, "ENCHANTED_STRING": 3},
-
     # --- Wither Blades ---
     "HYPERION": {"NECRON_HANDLE": 1, "WITHER_CATALYST": 24},
     "VALKYRIE": {"NECRON_HANDLE": 1, "WITHER_CATALYST": 24},
     "SCYLLA": {"NECRON_HANDLE": 1, "WITHER_CATALYST": 24},
     "ASTRAEA": {"NECRON_HANDLE": 1, "WITHER_CATALYST": 24},
-
     # --- Fishing Rods ---
     "ROD_OF_CHAMPIONS": {"ROD_OF_CHUNKS": 1, "ENCHANTED_LILY_PAD": 8},
     "ROD_OF_LEGENDS": {"ROD_OF_CHAMPIONS": 1, "ENCHANTED_LILY_PAD": 128},
     "ROD_OF_THE_SEA": {"ROD_OF_LEGENDS": 1, "SHARK_FIN": 128},
-
     # --- Orbs & Artifacts ---
     "RADIANT_POWER_ORB": {"WOLF_TOOTH": 16},
     "MANA_FLUX_POWER_ORB": {"RADIANT_POWER_ORB": 1, "GOLDEN_TOOTH": 32},
@@ -299,9 +293,7 @@ def load_custom_recipes(path: str = "config/recipes.json") -> int:
         if isinstance(data, dict):
             for k, v in data.items():
                 if isinstance(v, dict):
-                    RECIPES[k.strip().upper()] = {
-                        ing.strip().upper(): int(qty) for ing, qty in v.items()
-                    }
+                    RECIPES[k.strip().upper()] = {ing.strip().upper(): int(qty) for ing, qty in v.items()}
                     count += 1
         return count
     except Exception:
@@ -309,8 +301,6 @@ def load_custom_recipes(path: str = "config/recipes.json") -> int:
 
 
 # Integrate all 181 craftable accessories from accessory_recipes.py
-from src.constants.accessory_recipes import ACCESSORY_RECIPES
-
 RECIPES.update(ACCESSORY_RECIPES)
 
 # Auto-load external recipes if file exists

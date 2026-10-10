@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict, deque
 import logging
 import statistics
 import time
+from collections import defaultdict, deque
 from typing import Any, Optional
 
 import aiohttp
@@ -42,11 +41,7 @@ GEMSTONE_TYPES: list[str] = [
     "TOPAZ",
 ]
 
-ALL_GEMSTONE_PRODUCT_IDS: list[str] = [
-    f"{tier}_{gtype}_GEM"
-    for tier in GEMSTONE_TIERS
-    for gtype in GEMSTONE_TYPES
-]
+ALL_GEMSTONE_PRODUCT_IDS: list[str] = [f"{tier}_{gtype}_GEM" for tier in GEMSTONE_TIERS for gtype in GEMSTONE_TYPES]
 
 SECONDARY_ADDON_PRODUCT_IDS: list[str] = [
     "GEMSTONE_CHAMBER",
@@ -213,10 +208,7 @@ class BazaarCache:
             else (getattr(self.config, "BAZAAR_SHOCK_WINDOW_SECONDS", 300.0) if self.config else 300.0)
         )
 
-        valid_prices = [
-            price for ts, price in history
-            if (current_time - ts) <= window
-        ]
+        valid_prices = [price for ts, price in history if (current_time - ts) <= window]
         if not valid_prices:
             valid_prices = [price for _, price in history]
 

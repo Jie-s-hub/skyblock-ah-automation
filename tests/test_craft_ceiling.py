@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
 import pytest
 
 from src.config import Settings
-from src.constants.recipes import RECIPES, get_recipe, register_recipe
 from src.craft_evaluator import calculate_craft_cost
 from src.evaluator import FlipEvaluator, FlipResult
 from src.local_server import build_flip_payload
@@ -46,12 +44,15 @@ def test_config() -> Settings:
 # 1. calculate_craft_cost tests
 # ---------------------------------------------------------------------------
 
+
 def test_calculate_craft_cost_valid_recipe():
     # SUPER_COMPACTOR_3000: 448 ENCHANTED_COBBLESTONE + 1 ENCHANTED_REDSTONE_BLOCK
-    bz = MockBazaarCache({
-        "ENCHANTED_COBBLESTONE": 1000,
-        "ENCHANTED_REDSTONE_BLOCK": 52000,
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_COBBLESTONE": 1000,
+            "ENCHANTED_REDSTONE_BLOCK": 52000,
+        }
+    )
     cost = calculate_craft_cost("SUPER_COMPACTOR_3000", bz)
     assert cost == 448 * 1000 + 52000  # 500,000
 
@@ -66,19 +67,23 @@ def test_calculate_craft_cost_dict_bazaar():
 
 
 def test_calculate_craft_cost_missing_ingredient():
-    bz = MockBazaarCache({
-        "ENCHANTED_COBBLESTONE": 1000,
-        # Missing ENCHANTED_REDSTONE_BLOCK
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_COBBLESTONE": 1000,
+            # Missing ENCHANTED_REDSTONE_BLOCK
+        }
+    )
     cost = calculate_craft_cost("SUPER_COMPACTOR_3000", bz)
     assert cost is None
 
 
 def test_calculate_craft_cost_zero_price_ingredient():
-    bz = MockBazaarCache({
-        "ENCHANTED_COBBLESTONE": 1000,
-        "ENCHANTED_REDSTONE_BLOCK": 0,
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_COBBLESTONE": 1000,
+            "ENCHANTED_REDSTONE_BLOCK": 0,
+        }
+    )
     cost = calculate_craft_cost("SUPER_COMPACTOR_3000", bz)
     assert cost is None
 
@@ -98,16 +103,19 @@ def test_calculate_craft_cost_none_inputs():
 # 2. Gate 1: Never Buy Above Craft Cost (Clean item rejection)
 # ---------------------------------------------------------------------------
 
+
 def test_craft_bait_rejection_clean_listing(test_config):
     """
     Craft cost is 500k.
     Seller lists for 1,800,000 (craft bait spread against artificial 2nd LBIN of 4,000,000).
     Buy price (1.8M) >= craft_cost * 0.95 (475k). Must be rejected immediately!
     """
-    bz = MockBazaarCache({
-        "ENCHANTED_COBBLESTONE": 1000,
-        "ENCHANTED_REDSTONE_BLOCK": 52000,
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_COBBLESTONE": 1000,
+            "ENCHANTED_REDSTONE_BLOCK": 52000,
+        }
+    )
     evaluator = FlipEvaluator(config=test_config, bazaar_cache=bz)
     evaluator.set_price_cache({"SUPER_COMPACTOR_3000": [1_800_000, 4_000_000]})
 
@@ -120,10 +128,12 @@ def test_craft_bait_rejection_clean_listing(test_config):
 
 def test_craft_bait_rejection_at_exact_threshold(test_config):
     """Buy price is exactly at 95% of craft cost -> rejected."""
-    bz = MockBazaarCache({
-        "ENCHANTED_COBBLESTONE": 1000,
-        "ENCHANTED_REDSTONE_BLOCK": 52000,  # craft cost = 500,000
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_COBBLESTONE": 1000,
+            "ENCHANTED_REDSTONE_BLOCK": 52000,  # craft cost = 500,000
+        }
+    )
     evaluator = FlipEvaluator(config=test_config, bazaar_cache=bz)
     evaluator.set_price_cache({"SUPER_COMPACTOR_3000": [475_000, 1_000_000]})
 
@@ -138,6 +148,7 @@ def test_craft_bait_rejection_at_exact_threshold(test_config):
 # 3. Gate 2 & Gate 3: Ceiling Clamping & Artificial Spread Guard
 # ---------------------------------------------------------------------------
 
+
 def test_craft_ceiling_clamping_moderate_spread(test_config):
     """
     Craft cost = 500,000.
@@ -147,10 +158,12 @@ def test_craft_ceiling_clamping_moderate_spread(test_config):
     Net profit calculated on 525,000 after 1% tax:
     525,000 * 0.99 - 250,000 = 519,750 - 250,000 = 269,750.
     """
-    bz = MockBazaarCache({
-        "ENCHANTED_COBBLESTONE": 1000,
-        "ENCHANTED_REDSTONE_BLOCK": 52000,
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_COBBLESTONE": 1000,
+            "ENCHANTED_REDSTONE_BLOCK": 52000,
+        }
+    )
     evaluator = FlipEvaluator(config=test_config, bazaar_cache=bz)
     evaluator.set_price_cache({"SUPER_COMPACTOR_3000": [250_000, 600_000]})
 
@@ -174,10 +187,12 @@ def test_craft_ceiling_manipulation_spread_guard(test_config):
     Net profit calculated on 510,000 after 1% tax:
     510,000 * 0.99 - 200,000 = 504,900 - 200,000 = 304,900.
     """
-    bz = MockBazaarCache({
-        "ENCHANTED_COBBLESTONE": 1000,
-        "ENCHANTED_REDSTONE_BLOCK": 52000,
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_COBBLESTONE": 1000,
+            "ENCHANTED_REDSTONE_BLOCK": 52000,
+        }
+    )
     evaluator = FlipEvaluator(config=test_config, bazaar_cache=bz)
     evaluator.set_price_cache({"SUPER_COMPACTOR_3000": [200_000, 1_500_000]})
 
@@ -199,10 +214,12 @@ def test_craft_ceiling_not_capped_when_below_ceiling(test_config):
     2nd LBIN = 450,000 (below 500k * 1.05 = 525k).
     target_resell_price stays 450,000, is_craft_capped is False.
     """
-    bz = MockBazaarCache({
-        "ENCHANTED_COBBLESTONE": 1000,
-        "ENCHANTED_REDSTONE_BLOCK": 52000,
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_COBBLESTONE": 1000,
+            "ENCHANTED_REDSTONE_BLOCK": 52000,
+        }
+    )
     evaluator = FlipEvaluator(config=test_config, bazaar_cache=bz)
     evaluator.set_price_cache({"SUPER_COMPACTOR_3000": [250_000, 450_000]})
 
@@ -220,6 +237,7 @@ def test_craft_ceiling_not_capped_when_below_ceiling(test_config):
 # 4. Upgraded / Networth Flip Craft Ceiling
 # ---------------------------------------------------------------------------
 
+
 def test_upgraded_item_craft_ceiling(test_config):
     """
     Upgraded craftable item (e.g. JUJU_SHORTBOW with Recombobulator).
@@ -234,13 +252,15 @@ def test_upgraded_item_craft_ceiling(test_config):
     If buy price is 2,000,000, and resell baseline is 8,000,000 (> 4,968,000 * 1.30 = 6,458,400):
     Resell is clamped to 1.02 * 4,968,000 = 5,067,360.
     """
-    bz = MockBazaarCache({
-        "ENCHANTED_STRING": 2000,
-        "ENCHANTED_IRON": 1000,
-        "ENCHANTED_OBSIDIAN": 1000,
-        "NULL_OVOID": 10000,
-        "RECOMBOBULATOR_3000": 6_000_000,
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_STRING": 2000,
+            "ENCHANTED_IRON": 1000,
+            "ENCHANTED_OBSIDIAN": 1000,
+            "NULL_OVOID": 10000,
+            "RECOMBOBULATOR_3000": 6_000_000,
+        }
+    )
     evaluator = FlipEvaluator(config=test_config, bazaar_cache=bz)
     evaluator.set_price_cache({"JUJU_SHORTBOW": [2_000_000, 3_000_000]})
     evaluator.set_clean_price_cache({"JUJU_SHORTBOW": [2_500_000]})
@@ -271,13 +291,15 @@ def test_upgraded_item_buy_above_effective_craft_cost_rejected(test_config):
     If seller lists an upgraded item at 10M when effective craft cost is 4.968M,
     buy_price (10M) >= effective_craft_cost * 0.95 -> rejected!
     """
-    bz = MockBazaarCache({
-        "ENCHANTED_STRING": 2000,
-        "ENCHANTED_IRON": 1000,
-        "ENCHANTED_OBSIDIAN": 1000,
-        "NULL_OVOID": 10000,
-        "RECOMBOBULATOR_3000": 6_000_000,
-    })
+    bz = MockBazaarCache(
+        {
+            "ENCHANTED_STRING": 2000,
+            "ENCHANTED_IRON": 1000,
+            "ENCHANTED_OBSIDIAN": 1000,
+            "NULL_OVOID": 10000,
+            "RECOMBOBULATOR_3000": 6_000_000,
+        }
+    )
     evaluator = FlipEvaluator(config=test_config, bazaar_cache=bz)
     evaluator.set_price_cache({"JUJU_SHORTBOW": [5_500_000, 8_000_000]})
     evaluator.set_clean_price_cache({"JUJU_SHORTBOW": [4_000_000]})
@@ -296,6 +318,7 @@ def test_upgraded_item_buy_above_effective_craft_cost_rejected(test_config):
 # ---------------------------------------------------------------------------
 # 5. Embed Formatting and WebSocket Payload Integration
 # ---------------------------------------------------------------------------
+
 
 def test_embed_contains_craft_cost_field(test_config):
     notifier = DiscordNotifier(config=test_config)

@@ -2,7 +2,7 @@
 
 import os
 import tempfile
-import pytest
+
 from src.addon_rules import (
     calculate_drill_parts_cost,
     calculate_enrichment_cost,
@@ -17,7 +17,7 @@ from src.bazaar import BazaarCache
 from src.comps_evaluator import CompsEvaluator
 from src.config import Settings
 from src.db import DatabaseManager
-from src.evaluator import FlipEvaluator, FlipResult
+from src.evaluator import FlipEvaluator
 from src.networth_evaluator import calculate_item_networth
 
 
@@ -31,10 +31,12 @@ def test_load_addon_rules():
 
 def test_hot_potato_and_fuming_potato_book_cost():
     bazaar = BazaarCache()
-    bazaar.set_mock_prices({
-        "HOT_POTATO_BOOK": 60_000,
-        "FUMING_POTATO_BOOK": 1_200_000,
-    })
+    bazaar.set_mock_prices(
+        {
+            "HOT_POTATO_BOOK": 60_000,
+            "FUMING_POTATO_BOOK": 1_200_000,
+        }
+    )
 
     # Test 10 HPB (no FPB)
     hpb, fpb, cost, items = calculate_potato_book_cost(10, bazaar)
@@ -55,11 +57,13 @@ def test_hot_potato_and_fuming_potato_book_cost():
 
 def test_wither_scrolls_cost():
     bazaar = BazaarCache()
-    bazaar.set_mock_prices({
-        "WITHER_SHIELD_SCROLL": 150_000_000,
-        "IMPLOSION_SCROLL": 120_000_000,
-        "SHADOW_WARP_SCROLL": 110_000_000,
-    })
+    bazaar.set_mock_prices(
+        {
+            "WITHER_SHIELD_SCROLL": 150_000_000,
+            "IMPLOSION_SCROLL": 120_000_000,
+            "SHADOW_WARP_SCROLL": 110_000_000,
+        }
+    )
 
     scrolls = ["WITHER_SHIELD_SCROLL", "IMPLOSION_SCROLL", "SHADOW_WARP_SCROLL"]
     cost, items = calculate_wither_scrolls_cost(scrolls, bazaar)
@@ -69,11 +73,13 @@ def test_wither_scrolls_cost():
 
 def test_enrichment_and_drill_parts_cost():
     bazaar = BazaarCache()
-    bazaar.set_mock_prices({
-        "TALISMAN_ENRICHMENT_MAGIC_FIND": 12_000_000,
-        "TITANIUM_DRILL_ENGINE": 25_000_000,
-        "GEMSTONE_FUEL_TANK": 40_000_000,
-    })
+    bazaar.set_mock_prices(
+        {
+            "TALISMAN_ENRICHMENT_MAGIC_FIND": 12_000_000,
+            "TITANIUM_DRILL_ENGINE": 25_000_000,
+            "GEMSTONE_FUEL_TANK": 40_000_000,
+        }
+    )
 
     # Enrichment
     enrich_cost, enrich_items = calculate_enrichment_cost("MAGIC_FIND", bazaar)
@@ -92,11 +98,13 @@ def test_enrichment_and_drill_parts_cost():
 
 def test_networth_integration_with_phase_7_addons():
     bazaar = BazaarCache()
-    bazaar.set_mock_prices({
-        "HOT_POTATO_BOOK": 60_000,
-        "FUMING_POTATO_BOOK": 1_000_000,
-        "WITHER_SHIELD_SCROLL": 100_000_000,
-    })
+    bazaar.set_mock_prices(
+        {
+            "HOT_POTATO_BOOK": 60_000,
+            "FUMING_POTATO_BOOK": 1_000_000,
+            "WITHER_SHIELD_SCROLL": 100_000_000,
+        }
+    )
 
     decoded = {
         "internal_id": "NECRON_BLADE",

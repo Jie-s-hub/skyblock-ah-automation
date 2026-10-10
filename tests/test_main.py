@@ -79,8 +79,10 @@ async def test_run_monitor_cycle_with_auctions():
         {"uuid": "test-1", "starting_bid": 1_000_000, "item_name": "Test Item", "item_bytes": None},
     ]
 
-    with patch("src.main.HypixelClient.fetch_all_auctions", new_callable=AsyncMock) as mock_fetch, \
-         patch("src.main.HypixelClient.fetch_ended_auctions", new_callable=AsyncMock) as mock_ended:
+    with (
+        patch("src.main.HypixelClient.fetch_all_auctions", new_callable=AsyncMock) as mock_fetch,
+        patch("src.main.HypixelClient.fetch_ended_auctions", new_callable=AsyncMock) as mock_ended,
+    ):
         mock_fetch.return_value = sample_auctions
         mock_ended.return_value = []
 
@@ -167,30 +169,52 @@ async def test_e2e_dry_run_pipeline():
     # 2. Ingest market listings into cache
     market_batch = [
         # Necron's Chestplate (relaxed margin 10.25%)
-        ({"starting_bid": 40_000_000, "uuid": "necron_0"}, {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"}),
-        ({"starting_bid": 45_000_000, "uuid": "necron_1"}, {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"}),
-        ({"starting_bid": 46_000_000, "uuid": "necron_2"}, {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"}),
-
+        (
+            {"starting_bid": 40_000_000, "uuid": "necron_0"},
+            {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"},
+        ),
+        (
+            {"starting_bid": 45_000_000, "uuid": "necron_1"},
+            {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"},
+        ),
+        (
+            {"starting_bid": 46_000_000, "uuid": "necron_2"},
+            {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"},
+        ),
         # Livid Dagger (33.0% margin)
         ({"starting_bid": 7_000_000, "uuid": "livid_0"}, {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"}),
         ({"starting_bid": 9_500_000, "uuid": "livid_1"}, {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"}),
         ({"starting_bid": 9_800_000, "uuid": "livid_2"}, {"internal_id": "LIVID_DAGGER", "item_name": "Livid Dagger"}),
-
         # Runaan's Bow (37.2% margin)
         ({"starting_bid": 5_000_000, "uuid": "runaan_0"}, {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"}),
         ({"starting_bid": 7_000_000, "uuid": "runaan_1"}, {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"}),
         ({"starting_bid": 7_200_000, "uuid": "runaan_2"}, {"internal_id": "RUNAAN_BOW", "item_name": "Runaan's Bow"}),
-
         # Zero-velocity item
-        ({"starting_bid": 2_000_000, "uuid": "obsidian_0"}, {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"}),
-        ({"starting_bid": 6_000_000, "uuid": "obsidian_1"}, {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"}),
-        ({"starting_bid": 6_500_000, "uuid": "obsidian_2"}, {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"}),
-
+        (
+            {"starting_bid": 2_000_000, "uuid": "obsidian_0"},
+            {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"},
+        ),
+        (
+            {"starting_bid": 6_000_000, "uuid": "obsidian_1"},
+            {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"},
+        ),
+        (
+            {"starting_bid": 6_500_000, "uuid": "obsidian_2"},
+            {"internal_id": "OBSIDIAN_CHESTPLATE", "item_name": "Obsidian Chestplate"},
+        ),
         # Cosmetic bait
-        ({"starting_bid": 10_000_000, "uuid": "skin_0"}, {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"}),
-        ({"starting_bid": 30_000_000, "uuid": "skin_1"}, {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"}),
-        ({"starting_bid": 35_000_000, "uuid": "skin_2"}, {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"}),
-
+        (
+            {"starting_bid": 10_000_000, "uuid": "skin_0"},
+            {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"},
+        ),
+        (
+            {"starting_bid": 30_000_000, "uuid": "skin_1"},
+            {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"},
+        ),
+        (
+            {"starting_bid": 35_000_000, "uuid": "skin_2"},
+            {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Pet Skin (Ice)"},
+        ),
         # Cosmetic dye
         ({"starting_bid": 50_000_000, "uuid": "dye_0"}, {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"}),
         ({"starting_bid": 150_000_000, "uuid": "dye_1"}, {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"}),
@@ -235,3 +259,54 @@ async def test_e2e_dry_run_pipeline():
     assert await notifier.send_alert(res_runaan) is True
     await notifier.close()
 
+
+@pytest.mark.asyncio
+async def test_graceful_shutdown_cleans_resources():
+    """Verify run_monitor shuts down client, notifier, bazaar, broadcaster, and DB cleanly on stop."""
+    from src.config import Settings
+    from src.main import run_monitor
+
+    settings = Settings(
+        DRY_RUN=True,
+        POLL_INTERVAL_SECONDS=1,
+        ENABLE_LOCAL_WS=True,
+        LOCAL_WS_HOST="127.0.0.1",
+        LOCAL_WS_PORT=0,
+        ENABLE_NETWORTH_VALUATION=False,
+    )
+    stop_event = asyncio.Event()
+
+    with (
+        patch("src.main.HypixelClient") as MockClient,
+        patch("src.main.DiscordNotifier") as MockNotifier,
+        patch("src.main.BazaarCache") as MockBazaar,
+        patch("src.main.LocalWebSocketBroadcaster") as MockWS,
+    ):
+        mock_client_inst = AsyncMock()
+        mock_client_inst.fetch_all_auctions.return_value = None
+        mock_client_inst.last_updated_ms = None
+        mock_client_inst.get_session.return_value = AsyncMock()
+        MockClient.return_value = mock_client_inst
+
+        mock_notifier_inst = AsyncMock()
+        MockNotifier.return_value = mock_notifier_inst
+
+        mock_bazaar_inst = AsyncMock()
+        MockBazaar.return_value = mock_bazaar_inst
+
+        mock_ws_inst = AsyncMock()
+        MockWS.return_value = mock_ws_inst
+
+        # Trigger shutdown immediately after cycle starts
+        async def trigger_shutdown():
+            await asyncio.sleep(0.02)
+            stop_event.set()
+
+        asyncio.create_task(trigger_shutdown())
+        await run_monitor(settings, stop_event)
+
+        assert stop_event.is_set()
+        mock_client_inst.close.assert_awaited_once()
+        mock_notifier_inst.close.assert_awaited_once()
+        mock_bazaar_inst.close.assert_awaited_once()
+        mock_ws_inst.stop.assert_awaited_once()

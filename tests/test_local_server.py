@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+
 import pytest
 import websockets
 
-from src.config import Settings
 from src.evaluator import FlipResult
 from src.local_server import LocalWebSocketBroadcaster, build_flip_payload
 
@@ -211,5 +211,94 @@ async def test_websocket_broadcaster_multiple_clients():
 
             assert msg1["uuid"] == "uuid-multi"
             assert msg2["uuid"] == "uuid-multi"
+    finally:
+        await broadcaster.stop()
+
+
+def test_websocket_refuses_non_loopback():
+    """Verify LocalWebSocketBroadcaster refuses binding to non-loopback addresses."""
+    with pytest.raises(ValueError, match="only binds to loopback"):
+        LocalWebSocketBroadcaster(host="0.0.0.0", port=8765)
+
+    with pytest.raises(ValueError, match="only binds to loopback"):
+        LocalWebSocketBroadcaster(host="192.168.1.50", port=8765)
+
+    # Valid loopbacks should not raise
+    b1 = LocalWebSocketBroadcaster(host="127.0.0.1", port=8765)
+    assert b1.host == "127.0.0.1"
+    b2 = LocalWebSocketBroadcaster(host="localhost", port=8765)
+    assert b2.host == "localhost"
+    b3 = LocalWebSocketBroadcaster(host="::1", port=8765)
+    assert b3.host == "::1"
+
+
+@pytest.mark.asyncio
+async def test_websocket_origin_filtering():
+    """Verify handshake rejects unapproved Origin and allows approved or absent Origin."""
+    broadcaster = LocalWebSocketBroadcaster(
+        host="127.0.0.1",
+        port=0,
+        allowed_origins=["http://localhost:3000", "http://app.local"],
+    )
+    await broadcaster.start()
+    ws_url = f"ws://127.0.0.1:{broadcaster.actual_port}"
+
+    try:
+        # 1. Disallowed origin should be rejected (403 Forbidden)
+        try:
+            connect_kwargs = {"additional_headers": {"Origin": "http://evil.com"}}
+            async with websockets.connect(ws_url, **connect_kwargs):
+                pytest.fail("Disallowed Origin should have been rejected")
+        except websockets.exceptions.InvalidStatus as exc:
+            assert exc.response.status_code == 403
+        except websockets.exceptions.InvalidStatusCode as exc:
+            assert exc.status_code == 403
+
+        # 2. Allowed origin should connect
+        connect_kwargs = {"additional_headers": {"Origin": "http://localhost:3000"}}
+        async with websockets.connect(ws_url, **connect_kwargs) as ws:
+            assert ws is not None
+
+        # 3. Absent origin (e.g. native client mod) should connect
+        async with websockets.connect(ws_url) as ws:
+            assert ws is not None
+    finally:
+        await broadcaster.stop()
+
+
+@pytest.mark.asyncio
+async def test_websocket_token_authentication():
+    """Verify handshake rejects missing or invalid ?token= and accepts valid token."""
+    secret_token = "my-secure-token-xyz"
+    broadcaster = LocalWebSocketBroadcaster(
+        host="127.0.0.1",
+        port=0,
+        token=secret_token,
+    )
+    await broadcaster.start()
+    port = broadcaster.actual_port
+
+    try:
+        # 1. Missing token -> 401 Unauthorized
+        try:
+            async with websockets.connect(f"ws://127.0.0.1:{port}"):
+                pytest.fail("Connection without token should have been rejected")
+        except websockets.exceptions.InvalidStatus as exc:
+            assert exc.response.status_code == 401
+        except websockets.exceptions.InvalidStatusCode as exc:
+            assert exc.status_code == 401
+
+        # 2. Invalid token -> 401 Unauthorized
+        try:
+            async with websockets.connect(f"ws://127.0.0.1:{port}?token=bad-token"):
+                pytest.fail("Connection with bad token should have been rejected")
+        except websockets.exceptions.InvalidStatus as exc:
+            assert exc.response.status_code == 401
+        except websockets.exceptions.InvalidStatusCode as exc:
+            assert exc.status_code == 401
+
+        # 3. Valid token -> Success
+        async with websockets.connect(f"ws://127.0.0.1:{port}?token={secret_token}") as ws:
+            assert ws is not None
     finally:
         await broadcaster.stop()

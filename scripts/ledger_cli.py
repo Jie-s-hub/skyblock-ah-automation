@@ -3,24 +3,21 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 # Ensure project root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.constants.taxes import (
-    calculate_progressive_ah_tax,
-    calculate_progressive_net_profit,
-    calculate_progressive_net_revenue,
     collection_fee,
     creation_fee,
     net_revenue,
 )
-from src.db import DatabaseManager, get_db
+from src.db import DatabaseManager
 
 
 def format_duration(seconds: float) -> str:
@@ -138,7 +135,9 @@ def handle_mark_sold(args: argparse.Namespace, db: DatabaseManager) -> int:
         print("=======================================================")
         print(f"  Buy Price:          {buy_price:,} coins")
         print(f"  Realized Sale Price: {sell_price:,} coins")
-        print(f"  Auction House Fees: {tax:,} coins (Creation: {c_fee:,}, Collection: {col_fee:,}) ({effective_tax_pct:.2f}%)")
+        print(
+            f"  Auction House Fees: {tax:,} coins (Creation: {c_fee:,}, Collection: {col_fee:,}) ({effective_tax_pct:.2f}%)"
+        )
         print(f"  Net Realized PnL:   {pnl_sign}{net_pnl:,} coins ({roi_pct:.2f}%)")
         print(f"  Hold Duration:      {format_duration(hold_sec)}")
         print("=======================================================\n")

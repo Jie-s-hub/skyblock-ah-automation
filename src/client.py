@@ -145,9 +145,7 @@ class HypixelClient:
 
                     # Unhandled HTTP error status
                     text = await response.text()
-                    raise HypixelClientError(
-                        f"Unexpected HTTP {response.status} on page {page}: {text[:200]}"
-                    )
+                    raise HypixelClientError(f"Unexpected HTTP {response.status} on page {page}: {text[:200]}")
 
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 if attempt >= max_retries:
@@ -213,10 +211,7 @@ class HypixelClient:
 
         # Step 3: Concurrently fetch pages 1 to total_pages - 1
         if total_pages > 1:
-            tasks = [
-                self._fetch_bounded_page(p, session)
-                for p in range(1, total_pages)
-            ]
+            tasks = [self._fetch_bounded_page(p, session) for p in range(1, total_pages)]
             try:
                 subsequent_pages = await asyncio.gather(*tasks)
                 all_page_results.extend(subsequent_pages)
@@ -322,9 +317,7 @@ class HypixelClient:
                         continue
 
                     text = await response.text()
-                    raise HypixelClientError(
-                        f"Unexpected HTTP {response.status} fetching ended auctions: {text[:200]}"
-                    )
+                    raise HypixelClientError(f"Unexpected HTTP {response.status} fetching ended auctions: {text[:200]}")
 
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 if attempt >= max_retries:
@@ -343,6 +336,4 @@ class HypixelClient:
                 await asyncio.sleep(wait_time)
                 delay = min(delay * backoff_multiplier, max_delay)
 
-        raise HypixelClientError(
-            f"Exceeded max retries ({max_retries}) fetching ended auctions"
-        )
+        raise HypixelClientError(f"Exceeded max retries ({max_retries}) fetching ended auctions")

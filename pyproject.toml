@@ -1,0 +1,42 @@
+[project]
+name = "skyblock-ah-automation"
+version = "0.2.0"
+description = "Hypixel SkyBlock Auction House arbitrage engine and snipe alerter"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp==3.14.4",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.15.0",
+    "nbtlib==2.0.4",
+    "websockets==15.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.16.3",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+]
+ignore = [
+    "E501",  # Line length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]

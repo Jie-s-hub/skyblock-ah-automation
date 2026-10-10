@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 import logging
+from collections import defaultdict
 from typing import Any, Optional
 
 from src.bazaar import MASTER_STAR_PRODUCT_IDS, BazaarCache
 from src.constants.reforge_stones import REFORGE_STONE_DISPLAY_NAMES, REFORGE_STONE_MAP
 from src.constants.star_costs import get_star_essence_cost
+from src.enchant_evaluator import get_enchant_bazaar_cost
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +50,6 @@ def get_dynamic_retention_rate(base_lbin: int) -> float:
         return 0.70
     else:
         return 0.50
-
-
-from src.enchant_evaluator import (
-    PROGRESSION_ENCHANTS,
-    get_enchant_bazaar_candidates,
-    get_enchant_bazaar_cost,
-    get_enchant_bazaar_price,
-)
 
 
 def calculate_enchant_bazaar_cost(
@@ -100,12 +93,14 @@ def calculate_item_addons(
     if int(decoded_data.get("rarity_upgrades", 0)) >= 1:
         recomb_price = bazaar_cache.get_buy_price("RECOMBOBULATOR_3000")
         if recomb_price and recomb_price > 0:
-            addon_breakdown.append({
-                "type": "recomb",
-                "name": "Recombobulator 3000",
-                "cost": int(recomb_price),
-                "product_ids": ["RECOMBOBULATOR_3000"],
-            })
+            addon_breakdown.append(
+                {
+                    "type": "recomb",
+                    "name": "Recombobulator 3000",
+                    "cost": int(recomb_price),
+                    "product_ids": ["RECOMBOBULATOR_3000"],
+                }
+            )
 
     # 2. Master Stars (Stars 6 through 10 -> 1 to 5 Master Stars)
     total_stars = int(decoded_data.get("dungeon_stars", 0))
@@ -123,13 +118,15 @@ def calculate_item_addons(
                 ms_prod_ids.append(MASTER_STAR_PRODUCT_IDS[star_idx - 1])
 
         if master_star_total_cost > 0:
-            addon_breakdown.append({
-                "type": "master_star",
-                "name": f"Master Stars: {master_stars}x Applied",
-                "cost": master_star_total_cost,
-                "count": master_stars,
-                "product_ids": ms_prod_ids,
-            })
+            addon_breakdown.append(
+                {
+                    "type": "master_star",
+                    "name": f"Master Stars: {master_stars}x Applied",
+                    "cost": master_star_total_cost,
+                    "count": master_stars,
+                    "product_ids": ms_prod_ids,
+                }
+            )
 
     # 3. Slotted Gemstones
     gemstones = decoded_data.get("gemstones", [])
@@ -154,13 +151,15 @@ def calculate_item_addons(
                 for (qual, typ), cnt in sorted(gem_counts.items(), key=lambda x: (x[0][0], x[0][1]))
             ]
             gem_summary = ", ".join(gem_desc_parts)
-            addon_breakdown.append({
-                "type": "gemstones",
-                "name": f"Gemstones: {gem_summary}",
-                "cost": gemstones_total_cost,
-                "items": gemstones,
-                "product_ids": gem_prod_ids,
-            })
+            addon_breakdown.append(
+                {
+                    "type": "gemstones",
+                    "name": f"Gemstones: {gem_summary}",
+                    "cost": gemstones_total_cost,
+                    "items": gemstones,
+                    "product_ids": gem_prod_ids,
+                }
+            )
 
     # 4. Reforge Stone
     modifier = str(decoded_data.get("modifier", "")).strip().lower()
@@ -170,12 +169,14 @@ def calculate_item_addons(
             stone_cost = bazaar_cache.get_buy_price(stone_id)
             if stone_cost and stone_cost > 0:
                 stone_display = REFORGE_STONE_DISPLAY_NAMES.get(modifier, stone_id)
-                addon_breakdown.append({
-                    "type": "reforge",
-                    "name": stone_display,
-                    "cost": int(stone_cost),
-                    "product_ids": [stone_id],
-                })
+                addon_breakdown.append(
+                    {
+                        "type": "reforge",
+                        "name": stone_display,
+                        "cost": int(stone_cost),
+                        "product_ids": [stone_id],
+                    }
+                )
 
     # 5. Enchantments with anvil compounding
     enchantments = decoded_data.get("enchantments", {})
@@ -188,12 +189,14 @@ def calculate_item_addons(
                 display_name = f"{format_enchant_fn(ench_name)} {lvl}"
             else:
                 display_name = f"{ench_name.replace('_', ' ').title()} {lvl}"
-            addon_breakdown.append({
-                "type": "enchant",
-                "name": display_name,
-                "cost": book_cost,
-                "product_ids": [book_id] if book_id else [],
-            })
+            addon_breakdown.append(
+                {
+                    "type": "enchant",
+                    "name": display_name,
+                    "cost": book_cost,
+                    "product_ids": [book_id] if book_id else [],
+                }
+            )
 
     # 6. Essence Stars (1-5)
     essence_stars = min(total_stars, 5)
@@ -204,12 +207,14 @@ def calculate_item_addons(
             if unit_price and unit_price > 0:
                 essence_cost = int(essence_count * unit_price)
                 clean_essence_name = essence_type.replace("ESSENCE_", "").capitalize() + " Essence"
-                addon_breakdown.append({
-                    "type": "essence",
-                    "name": f"{essence_count:,}x {clean_essence_name}",
-                    "cost": essence_cost,
-                    "product_ids": [essence_type],
-                })
+                addon_breakdown.append(
+                    {
+                        "type": "essence",
+                        "name": f"{essence_count:,}x {clean_essence_name}",
+                        "cost": essence_cost,
+                        "product_ids": [essence_type],
+                    }
+                )
 
     # 7. Divan's Armor Gemstone Chambers
     gemstone_chambers = int(decoded_data.get("gemstone_chambers", 0))
@@ -217,39 +222,45 @@ def calculate_item_addons(
         chamber_price = bazaar_cache.get_buy_price("GEMSTONE_CHAMBER")
         if chamber_price and chamber_price > 0:
             chambers_cost = int(gemstone_chambers * chamber_price)
-            addon_breakdown.append({
-                "type": "gemstone_chambers",
-                "name": f"Gemstone Chambers: {gemstone_chambers}x Unlocked",
-                "cost": chambers_cost,
-                "count": gemstone_chambers,
-                "product_ids": ["GEMSTONE_CHAMBER"],
-            })
+            addon_breakdown.append(
+                {
+                    "type": "gemstone_chambers",
+                    "name": f"Gemstone Chambers: {gemstone_chambers}x Unlocked",
+                    "cost": chambers_cost,
+                    "count": gemstone_chambers,
+                    "product_ids": ["GEMSTONE_CHAMBER"],
+                }
+            )
 
     # 8. The Art of War
     art_of_war_count = int(decoded_data.get("art_of_war_count", 0))
     if art_of_war_count >= 1:
         aow_price = bazaar_cache.get_buy_price("THE_ART_OF_WAR")
         if aow_price and aow_price > 0:
-            addon_breakdown.append({
-                "type": "art_of_war",
-                "name": "The Art of War (+5 ⚔)",
-                "cost": int(aow_price * art_of_war_count),
-                "count": art_of_war_count,
-                "product_ids": ["THE_ART_OF_WAR"],
-            })
+            addon_breakdown.append(
+                {
+                    "type": "art_of_war",
+                    "name": "The Art of War (+5 ⚔)",
+                    "cost": int(aow_price * art_of_war_count),
+                    "count": art_of_war_count,
+                    "product_ids": ["THE_ART_OF_WAR"],
+                }
+            )
 
     # 9. Wood Singularity
     wood_singularity_count = int(decoded_data.get("wood_singularity_count", 0))
     if wood_singularity_count >= 1:
         ws_price = bazaar_cache.get_buy_price("WOOD_SINGULARITY")
         if ws_price and ws_price > 0:
-            addon_breakdown.append({
-                "type": "wood_singularity",
-                "name": "Wood Singularity (+100 ⚔)",
-                "cost": int(ws_price * wood_singularity_count),
-                "count": wood_singularity_count,
-                "product_ids": ["WOOD_SINGULARITY"],
-            })
+            addon_breakdown.append(
+                {
+                    "type": "wood_singularity",
+                    "name": "Wood Singularity (+100 ⚔)",
+                    "cost": int(ws_price * wood_singularity_count),
+                    "count": wood_singularity_count,
+                    "product_ids": ["WOOD_SINGULARITY"],
+                }
+            )
 
     # 10. Transmission Tuners
     transmission_tuners = int(decoded_data.get("transmission_tuners", 0))
@@ -257,13 +268,15 @@ def calculate_item_addons(
         tt_price = bazaar_cache.get_buy_price("TRANSMISSION_TUNER")
         if tt_price and tt_price > 0:
             tuners_cost = int(transmission_tuners * tt_price)
-            addon_breakdown.append({
-                "type": "transmission_tuners",
-                "name": f"Transmission Tuners: {transmission_tuners}x Applied",
-                "cost": tuners_cost,
-                "count": transmission_tuners,
-                "product_ids": ["TRANSMISSION_TUNER"],
-            })
+            addon_breakdown.append(
+                {
+                    "type": "transmission_tuners",
+                    "name": f"Transmission Tuners: {transmission_tuners}x Applied",
+                    "cost": tuners_cost,
+                    "count": transmission_tuners,
+                    "product_ids": ["TRANSMISSION_TUNER"],
+                }
+            )
 
     # 11. Hot Potato & Fuming Potato Books (1-10 HPB, 11-15 FPB)
     hot_potato_count = int(decoded_data.get("hot_potato_count", 0))

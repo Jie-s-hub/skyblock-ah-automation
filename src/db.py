@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 import json
 import logging
-import os
 import sqlite3
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 
@@ -264,14 +263,13 @@ class DatabaseManager:
         if profit_val is None:
             profit_val = 0
         feat_str = (
-            features_json
-            if isinstance(features_json, str)
-            else json.dumps(features_json or {}, separators=(",", ":"))
+            features_json if isinstance(features_json, str) else json.dumps(features_json or {}, separators=(",", ":"))
         )
         trace_str = (
             trace_json
             if isinstance(trace_json, str)
-            else json.dumps(trace_json, separators=(",", ":")) if trace_json is not None
+            else json.dumps(trace_json, separators=(",", ":"))
+            if trace_json is not None
             else None
         )
 
@@ -485,9 +483,7 @@ class DatabaseManager:
         conn = self._get_connection()
         ts = buy_timestamp if buy_timestamp is not None else int(time.time() * 1000)
         feat_str = (
-            features_json
-            if isinstance(features_json, str)
-            else json.dumps(features_json or {}, separators=(",", ":"))
+            features_json if isinstance(features_json, str) else json.dumps(features_json or {}, separators=(",", ":"))
         )
 
         query = """
@@ -544,13 +540,20 @@ class DatabaseManager:
         ts = realized_sell_timestamp if realized_sell_timestamp is not None else int(time.time() * 1000)
 
         existing = self.get_purchase(auction_uuid) if (net_realized_pnl is None or derpy_active is None) else None
-        is_derpy = bool(derpy_active if derpy_active is not None else (existing.get("derpy_active", 0) if existing else 0))
-        model_ver = fee_model_version if fee_model_version is not None else (existing.get("fee_model_version", 2) if existing else 2)
+        is_derpy = bool(
+            derpy_active if derpy_active is not None else (existing.get("derpy_active", 0) if existing else 0)
+        )
+        model_ver = (
+            fee_model_version
+            if fee_model_version is not None
+            else (existing.get("fee_model_version", 2) if existing else 2)
+        )
 
         # If net_realized_pnl is omitted, look up original buy_price and compute with net_revenue
         if net_realized_pnl is None:
             if existing:
                 from src.constants.taxes import net_revenue
+
                 buy_p = int(existing["buy_price"])
                 net_realized_pnl = net_revenue(realized_sell_price, derpy_active=is_derpy) - buy_p
             else:
@@ -636,9 +639,7 @@ class DatabaseManager:
         """Insert or ignore a completed auction from auctions_ended."""
         conn = self._get_connection()
         feat_str = (
-            features_json
-            if isinstance(features_json, str)
-            else json.dumps(features_json or {}, separators=(",", ":"))
+            features_json if isinstance(features_json, str) else json.dumps(features_json or {}, separators=(",", ":"))
         )
 
         # Join with live listing start timestamp if not explicitly passed

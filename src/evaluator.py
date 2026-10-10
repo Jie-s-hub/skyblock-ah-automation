@@ -11,6 +11,32 @@ import time
 from collections import defaultdict
 from typing import Any, Optional
 
+from pydantic import BaseModel, Field
+
+from src.bazaar import BazaarCache
+from src.config import Settings
+from src.constants.attributes import (
+    calculate_attribute_estimated_value,
+)
+from src.constants.lanes import (
+    LANE_FLOOR,
+    LANE_GOD_ROLL,
+    LANE_PETS,
+    LANE_SOLD_COMPS,
+    LANE_UPGRADED_NETWORTH,
+    resolve_canonical_lane,
+)
+from src.constants.pet_levels import (
+    get_pet_bucket_key,
+    get_pet_held_item_info,
+    get_pet_level_premium,
+    is_pet_xp_in_window,
+)
+from src.constants.recipes import get_base_item_id, get_recipe
+from src.constants.reforge_stones import REFORGE_STONE_MAP
+from src.craft_evaluator import calculate_craft_cost
+from src.velocity import SalesVelocityTracker
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,41 +54,6 @@ def calculate_percentile(values: list[int], pct: float) -> float:
     d0 = sorted_v[int(f)] * (c - k)
     d1 = sorted_v[int(c)] * (k - f)
     return float(d0 + d1)
-
-
-from pydantic import BaseModel, Field
-
-from src.bazaar import BazaarCache
-from src.config import Settings
-from src.constants.attributes import (
-    calculate_attribute_estimated_value,
-    check_god_roll,
-    format_attributes,
-)
-from src.constants.pet_levels import (
-    calculate_pet_level,
-    get_held_item_group,
-    get_pet_bucket_key,
-    get_pet_held_item_info,
-    get_pet_level_bracket,
-    get_pet_level_premium,
-    get_pet_max_level,
-    is_pet_xp_in_window,
-)
-from src.constants.lanes import (
-    CANONICAL_LANES,
-    LANE_FLOOR,
-    LANE_GOD_ROLL,
-    LANE_PETS,
-    LANE_SOLD_COMPS,
-    LANE_UPGRADED_NETWORTH,
-    resolve_canonical_lane,
-)
-from src.constants.reforge_stones import REFORGE_STONE_DISPLAY_NAMES, REFORGE_STONE_MAP
-from src.constants.star_costs import get_star_essence_cost
-from src.constants.recipes import get_base_item_id, get_recipe
-from src.craft_evaluator import calculate_craft_cost
-from src.velocity import SalesVelocityTracker
 
 
 class FlipResult(BaseModel):
@@ -186,7 +177,6 @@ class Decision(BaseModel):
 
     def to_trace_json(self) -> str:
         return json.dumps(self.to_trace_dict(), separators=(",", ":"))
-
 
 
 PROGRESSION_STAPLES: dict[str, str] = {
@@ -364,6 +354,7 @@ class FlipEvaluator:
 
         if getattr(self.config, "ENABLE_CLIFF_SNAPPING", True):
             from src.constants.taxes import optimize_target_resell
+
             resell = optimize_target_resell(resell, derpy=getattr(self.config, "MAYOR_DERPY_ACTIVE", False))
 
         return resell
@@ -417,16 +408,12 @@ class FlipEvaluator:
     ) -> None:
         """Set mock seller distribution for unit testing."""
         self._seller_counts = defaultdict(
-            lambda: defaultdict(int),
-            {k: defaultdict(int, v) for k, v in seller_counts.items()}
+            lambda: defaultdict(int), {k: defaultdict(int, v) for k, v in seller_counts.items()}
         )
         if listing_counts is not None:
             self._item_listing_counts = defaultdict(int, listing_counts)
         else:
-            self._item_listing_counts = defaultdict(
-                int,
-                {k: sum(v.values()) for k, v in seller_counts.items()}
-            )
+            self._item_listing_counts = defaultdict(int, {k: sum(v.values()) for k, v in seller_counts.items()})
 
     def get_seller_domination_ratio(self, internal_id: str) -> float:
         """Return the highest listing ownership percentage by a single seller for an item."""
@@ -461,11 +448,7 @@ class FlipEvaluator:
                 return False
 
         ratio = self.get_seller_domination_ratio(internal_id)
-        dom_thresh = (
-            threshold
-            if threshold is not None
-            else getattr(self.config, "MAX_SELLER_DOMINATION_RATIO", 0.40)
-        )
+        dom_thresh = threshold if threshold is not None else getattr(self.config, "MAX_SELLER_DOMINATION_RATIO", 0.40)
         return ratio >= dom_thresh
 
     def get_base_lbin(self, internal_id: str) -> Optional[int]:
@@ -496,6 +479,7 @@ class FlipEvaluator:
         src/constants/taxes.py is the single source of truth.
         """
         from src.constants.taxes import net_revenue
+
         return net_revenue(
             resell_price,
             derpy_active=self.derpy_active,
@@ -655,7 +639,10 @@ class FlipEvaluator:
             return True
         if bool(decoded_data.get("talisman_enrichment")):
             return True
-        if any(bool(decoded_data.get(k)) for k in ("drill_part_engine", "drill_part_fuel_tank", "drill_part_upgrade_module")):
+        if any(
+            bool(decoded_data.get(k))
+            for k in ("drill_part_engine", "drill_part_fuel_tank", "drill_part_upgrade_module")
+        ):
             return True
         modifier = str(decoded_data.get("modifier", "")).strip().lower()
         if modifier and modifier in REFORGE_STONE_MAP and REFORGE_STONE_MAP[modifier]:
@@ -766,20 +753,22 @@ class FlipEvaluator:
                 if decoded.get("is_pet"):
                     minor_thresh = getattr(self.config, "PET_MINOR_HELD_ITEM_THRESHOLD_COINS", 2_000_000)
                     b_key = get_pet_bucket_key(decoded, minor_threshold=minor_thresh, bazaar_cache=self.bazaar_cache)
-                    new_pet_buckets[b_key].append({
-                        "uuid": str(auction.get("uuid", "")),
-                        "price": int_price,
-                        "xp": float(decoded.get("pet_exp", 0.0)),
-                        "level": int(decoded.get("pet_level", 1)),
-                        "auctioneer": seller,
-                        "start": start_ms,
-                        "item_name": item_name,
-                        "candy_used": int(decoded.get("pet_candy_used", 0)),
-                        "skin": decoded.get("pet_skin"),
-                        "held_item": decoded.get("pet_held_item", ""),
-                        "effective_tier": decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON"),
-                        "pet_type": decoded.get("pet_type", ""),
-                    })
+                    new_pet_buckets[b_key].append(
+                        {
+                            "uuid": str(auction.get("uuid", "")),
+                            "price": int_price,
+                            "xp": float(decoded.get("pet_exp", 0.0)),
+                            "level": int(decoded.get("pet_level", 1)),
+                            "auctioneer": seller,
+                            "start": start_ms,
+                            "item_name": item_name,
+                            "candy_used": int(decoded.get("pet_candy_used", 0)),
+                            "skin": decoded.get("pet_skin"),
+                            "held_item": decoded.get("pet_held_item", ""),
+                            "effective_tier": decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON"),
+                            "pet_type": decoded.get("pet_type", ""),
+                        }
+                    )
 
         for internal_id in new_cache:
             new_cache[internal_id].sort()
@@ -893,15 +882,13 @@ class FlipEvaluator:
         if getattr(self.config, "ENABLE_DYNAMIC_RETENTION", False) and self.retention_fitter is not None:
             override_retention = self.retention_fitter.get_retention_rate(internal_id, base_lbin)
 
-        addon_breakdown, total_addon_cost, intrinsic_worth, retention_rate, resell_baseline = (
-            calculate_item_networth(
-                base_lbin=base_lbin,
-                decoded_data=decoded_data,
-                bazaar_cache=self.bazaar_cache,
-                is_valuable_enchant_fn=self.is_valuable_enchant,
-                format_enchant_fn=self._format_enchant_display_name,
-                override_retention_rate=override_retention,
-            )
+        addon_breakdown, total_addon_cost, intrinsic_worth, retention_rate, resell_baseline = calculate_item_networth(
+            base_lbin=base_lbin,
+            decoded_data=decoded_data,
+            bazaar_cache=self.bazaar_cache,
+            is_valuable_enchant_fn=self.is_valuable_enchant,
+            format_enchant_fn=self._format_enchant_display_name,
+            override_retention_rate=override_retention,
         )
 
         if total_addon_cost <= 0:
@@ -911,7 +898,11 @@ class FlipEvaluator:
         if getattr(self.config, "ENABLE_BAZAAR_SHOCK_GUARD", False) and self.bazaar_cache is not None:
             for addon in addon_breakdown:
                 for prod_id in addon.get("product_ids", []):
-                    if prod_id and hasattr(self.bazaar_cache, "is_price_shocked") and self.bazaar_cache.is_price_shocked(prod_id):
+                    if (
+                        prod_id
+                        and hasattr(self.bazaar_cache, "is_price_shocked")
+                        and self.bazaar_cache.is_price_shocked(prod_id)
+                    ):
                         logger.debug(
                             "Rejecting upgraded flip for %s: addon %s is price shocked in Bazaar",
                             internal_id,
@@ -943,9 +934,13 @@ class FlipEvaluator:
                 return None
 
             # Gate 3 (Artificial Spread / Bait Guard): >30% higher than craft cost
-            manipulation_threshold = effective_craft_cost * getattr(self.config, "CRAFT_MANIPULATION_THRESHOLD_RATIO", 1.30)
+            manipulation_threshold = effective_craft_cost * getattr(
+                self.config, "CRAFT_MANIPULATION_THRESHOLD_RATIO", 1.30
+            )
             if resell_baseline > manipulation_threshold:
-                resell_baseline = int(effective_craft_cost * getattr(self.config, "CRAFT_MANIPULATION_CEILING_RATIO", 1.02))
+                resell_baseline = int(
+                    effective_craft_cost * getattr(self.config, "CRAFT_MANIPULATION_CEILING_RATIO", 1.02)
+                )
                 is_craft_capped = True
             else:
                 # Gate 2 (Ceiling Clamping)
@@ -1024,7 +1019,6 @@ class FlipEvaluator:
             )
 
         return None
-
 
     def _evaluate_clean_listing(
         self,
@@ -1181,10 +1175,7 @@ class FlipEvaluator:
             required_profit = self.config.MIN_PROFIT_COINS
             required_margin = self.config.MIN_PROFIT_MARGIN_PCT
 
-        if (
-            net_profit >= required_profit
-            and margin_pct >= required_margin
-        ):
+        if net_profit >= required_profit and margin_pct >= required_margin:
             queue_depth = self.calculate_queue_depth(internal_id, target_resell_price, buy_price=buy_price)
             return FlipResult(
                 auction_uuid=str(auction.get("uuid", "")),
@@ -1322,9 +1313,7 @@ class FlipEvaluator:
         (ENABLE_PET_BUCKET_VALUATION=True) or legacy heuristic.
         """
         if getattr(self.config, "ENABLE_PET_BUCKET_VALUATION", True):
-            return self._evaluate_pet_bucket_listing(
-                auction, decoded_data, sorted_prices, now_ms=now_ms
-            )
+            return self._evaluate_pet_bucket_listing(auction, decoded_data, sorted_prices, now_ms=now_ms)
         return self._evaluate_legacy_pet_listing(auction, decoded_data, sorted_prices)
 
     def _evaluate_legacy_pet_listing(
@@ -1473,14 +1462,14 @@ class FlipEvaluator:
         bucket_listings = list(self._pet_buckets.get(bucket_key, []))
 
         # Candidate excludes itself strictly by uuid, never by price
-        other_listings = [l for l in bucket_listings if l.get("uuid") != uuid]
+        other_listings = [item for item in bucket_listings if item.get("uuid") != uuid]
 
         # Filter other listings by XP window (+/- 25%)
         xp_window_pct = getattr(self.config, "PET_XP_WINDOW_PCT", 25.0)
         comparable_listings = [
-            l
-            for l in other_listings
-            if is_pet_xp_in_window(pet_exp, float(l.get("xp", 0.0)), window_pct=xp_window_pct)
+            item
+            for item in other_listings
+            if is_pet_xp_in_window(pet_exp, float(item.get("xp", 0.0)), window_pct=xp_window_pct)
         ]
 
         ref_listing: Optional[dict[str, Any]] = None
@@ -1504,9 +1493,7 @@ class FlipEvaluator:
                 return None
 
             # 2. Supply dump check: 2+ other listings share the lowest price within 1%
-            floor_matches = [
-                l for l in comparable_listings if l["price"] <= ref_price * (1.0 + tie_tol)
-            ]
+            floor_matches = [item for item in comparable_listings if item["price"] <= ref_price * (1.0 + tie_tol)]
             if len(floor_matches) >= 2:
                 self.last_pet_rejections[uuid] = "SUPPLY_DUMP"
                 logger.info(
@@ -1522,8 +1509,8 @@ class FlipEvaluator:
             if len(comparable_listings) >= min_dom_listings:
                 dom_threshold = getattr(self.config, "MAX_SELLER_DOMINATION_RATIO", 0.40)
                 seller_counts: dict[str, int] = defaultdict(int)
-                for l in comparable_listings:
-                    s_name = l.get("auctioneer") or ""
+                for item in comparable_listings:
+                    s_name = item.get("auctioneer") or ""
                     if s_name:
                         seller_counts[s_name] += 1
                 if seller_counts:
@@ -1542,14 +1529,10 @@ class FlipEvaluator:
         comps_window_hours = getattr(self.config, "PET_COMPS_WINDOW_HOURS", 48.0)
         start_window_ms = int(current_now_ms - comps_window_hours * 3600.0 * 1000.0)
 
-        db_instance = self.db or (
-            getattr(self.comps_evaluator, "db", None) if self.comps_evaluator else None
-        )
+        db_instance = self.db or (getattr(self.comps_evaluator, "db", None) if self.comps_evaluator else None)
         raw_sales: list[dict[str, Any]] = []
         if db_instance is not None:
-            raw_sales = db_instance.get_sales(
-                internal_id=internal_id, start_time=start_window_ms
-            )
+            raw_sales = db_instance.get_sales(internal_id=internal_id, start_time=start_window_ms)
 
         # Filter sales matching exact bucket
         matching_sales: list[dict[str, Any]] = []
@@ -1565,9 +1548,7 @@ class FlipEvaluator:
             else:
                 s_decoded = {}
 
-            s_bucket = get_pet_bucket_key(
-                s_decoded, minor_threshold=minor_thresh, bazaar_cache=self.bazaar_cache
-            )
+            s_bucket = get_pet_bucket_key(s_decoded, minor_threshold=minor_thresh, bazaar_cache=self.bazaar_cache)
             if s_bucket == bucket_key:
                 matching_sales.append(s)
 
@@ -1585,7 +1566,11 @@ class FlipEvaluator:
             "LEGENDARY": 3,
             "MYTHIC": 3,
         }
-        min_comps = rarity_gate_map.get(effective_tier) or rarity_gate_map.get(pet_tier) or getattr(self.config, "PET_MIN_SOLD_COMPS_48H", 3)
+        min_comps = (
+            rarity_gate_map.get(effective_tier)
+            or rarity_gate_map.get(pet_tier)
+            or getattr(self.config, "PET_MIN_SOLD_COMPS_48H", 3)
+        )
 
         if len(matching_sales) < min_comps:
             self.last_pet_rejections[uuid] = "pet_sales_gate"
@@ -1654,9 +1639,7 @@ class FlipEvaluator:
         if getattr(self.config, "ENABLE_CRAFT_CEILING", True) and self.bazaar_cache is not None:
             craft_cost = calculate_craft_cost(internal_id, self.bazaar_cache, ah_cache=self)
             if craft_cost is not None:
-                buy_thresh = craft_cost * getattr(
-                    self.config, "CRAFT_BUY_THRESHOLD_RATIO", 0.95
-                )
+                buy_thresh = craft_cost * getattr(self.config, "CRAFT_BUY_THRESHOLD_RATIO", 0.95)
                 if buy_price >= buy_thresh:
                     return None
                 ceiling = int(craft_cost * getattr(self.config, "CRAFT_CEILING_RATIO", 1.05))
@@ -1686,10 +1669,7 @@ class FlipEvaluator:
         opt_net_revenue = self.calculate_net_revenue(optimistic_target)
         optimistic_upside = max(0, int(opt_net_revenue - buy_price))
 
-        if (
-            net_profit < self.config.MIN_PROFIT_COINS
-            or margin_pct < self.config.MIN_PROFIT_MARGIN_PCT
-        ):
+        if net_profit < self.config.MIN_PROFIT_COINS or margin_pct < self.config.MIN_PROFIT_MARGIN_PCT:
             return None
 
         # Multi-factor confidence & Margin review cap
@@ -1715,7 +1695,9 @@ class FlipEvaluator:
         # Downgrade confidence if lane conversion haircut is active
         if getattr(self.config, "ENABLE_LANE_CONVERSION_HAIRCUT", True) and self.survival_auditor is not None:
             if self.survival_auditor.get_lane_haircut("PET_BUCKET") > 0.0:
-                confidence_label = "LOW" if confidence_label == "MEDIUM" else "MEDIUM" if confidence_label == "HIGH" else "LOW"
+                confidence_label = (
+                    "LOW" if confidence_label == "MEDIUM" else "MEDIUM" if confidence_label == "HIGH" else "LOW"
+                )
 
         daily_velocity: Optional[float] = None
         if self.velocity_tracker is not None:
@@ -1724,13 +1706,14 @@ class FlipEvaluator:
         # Mark dedupe timestamp upon successful alert qualification
         self._pet_dedupe_cache[dedupe_key] = now_sec
 
-        queue_depth = self.calculate_queue_depth(internal_id, target_resell, buy_price=buy_price, pet_bucket_key=bucket_key)
+        queue_depth = self.calculate_queue_depth(
+            internal_id, target_resell, buy_price=buy_price, pet_bucket_key=bucket_key
+        )
 
         return FlipResult(
             auction_uuid=uuid,
             internal_id=internal_id,
-            item_name=decoded_data.get("item_name")
-            or auction.get("item_name", "Unknown Pet"),
+            item_name=decoded_data.get("item_name") or auction.get("item_name", "Unknown Pet"),
             buy_price=buy_price,
             target_resell_price=target_resell,
             net_profit=net_profit,
@@ -1802,19 +1785,18 @@ class FlipEvaluator:
 
         if is_upgraded and self.bazaar_cache is not None:
             from src.networth_evaluator import calculate_item_networth
+
             override_retention = None
             if getattr(self.config, "ENABLE_DYNAMIC_RETENTION", False) and self.retention_fitter is not None:
                 override_retention = self.retention_fitter.get_retention_rate(internal_id, base_lbin)
 
-            addon_breakdown, total_addon_cost, intrinsic_worth, retention_rate, path_b_resell = (
-                calculate_item_networth(
-                    base_lbin=base_lbin,
-                    decoded_data=decoded_data,
-                    bazaar_cache=self.bazaar_cache,
-                    is_valuable_enchant_fn=self.is_valuable_enchant,
-                    format_enchant_fn=self._format_enchant_display_name,
-                    override_retention_rate=override_retention,
-                )
+            addon_breakdown, total_addon_cost, intrinsic_worth, retention_rate, path_b_resell = calculate_item_networth(
+                base_lbin=base_lbin,
+                decoded_data=decoded_data,
+                bazaar_cache=self.bazaar_cache,
+                is_valuable_enchant_fn=self.is_valuable_enchant,
+                format_enchant_fn=self._format_enchant_display_name,
+                override_retention_rate=override_retention,
             )
 
         comps_res = self.comps_evaluator.estimate_comps_value(
@@ -1850,7 +1832,9 @@ class FlipEvaluator:
             craft_cost = calculate_craft_cost(internal_id, self.bazaar_cache, ah_cache=self)
 
         if craft_cost is not None:
-            effective_craft_cost = craft_cost + int(round(total_addon_cost * retention_rate)) if total_addon_cost > 0 else craft_cost
+            effective_craft_cost = (
+                craft_cost + int(round(total_addon_cost * retention_rate)) if total_addon_cost > 0 else craft_cost
+            )
 
             # Gate 1: Never Buy Above Craft Cost
             buy_threshold = effective_craft_cost * getattr(self.config, "CRAFT_BUY_THRESHOLD_RATIO", 0.95)
@@ -1858,9 +1842,13 @@ class FlipEvaluator:
                 return None, True
 
             # Gate 3: Artificial Spread / Bait Guard (>30% higher than craft cost)
-            manipulation_threshold = effective_craft_cost * getattr(self.config, "CRAFT_MANIPULATION_THRESHOLD_RATIO", 1.30)
+            manipulation_threshold = effective_craft_cost * getattr(
+                self.config, "CRAFT_MANIPULATION_THRESHOLD_RATIO", 1.30
+            )
             if target_resell > manipulation_threshold:
-                target_resell = int(effective_craft_cost * getattr(self.config, "CRAFT_MANIPULATION_CEILING_RATIO", 1.02))
+                target_resell = int(
+                    effective_craft_cost * getattr(self.config, "CRAFT_MANIPULATION_CEILING_RATIO", 1.02)
+                )
                 is_craft_capped = True
             else:
                 # Gate 2: Ceiling Clamping
@@ -1982,6 +1970,7 @@ class FlipEvaluator:
         )
 
         from src.constants.taxes import best_resale_net
+
         best_res = best_resale_net(
             flip.target_resell_price,
             derpy_active=self.derpy_active,
@@ -2143,14 +2132,14 @@ class FlipEvaluator:
 
         # Stage 2.5: Historical Comparable-Sales Engine (Phase 3)
         if getattr(self.config, "ENABLE_SOLD_COMPS", False) and self.comps_evaluator is not None:
-            comps_flip, comps_found = self._evaluate_comps_listing(
-                auction, decoded_data, sorted_prices, now_ms=now_ms
-            )
+            comps_flip, comps_found = self._evaluate_comps_listing(auction, decoded_data, sorted_prices, now_ms=now_ms)
             if comps_found:
                 if comps_flip is not None:
                     fin = self._finalize_flip(comps_flip)
                     if fin is not None:
-                        return self.last_decision or Decision(accepted=True, lane=LANE_SOLD_COMPS, path=comps_flip.valuation_path, flip=fin)
+                        return self.last_decision or Decision(
+                            accepted=True, lane=LANE_SOLD_COMPS, path=comps_flip.valuation_path, flip=fin
+                        )
                     return _reject("comps_capital_efficiency", lane=LANE_SOLD_COMPS, path=comps_flip.valuation_path)
                 return _reject("comps_unprofitable", lane=LANE_SOLD_COMPS, path="SOLD_COMPS")
 
@@ -2164,7 +2153,9 @@ class FlipEvaluator:
             if networth_flip is not None:
                 fin = self._finalize_flip(networth_flip)
                 if fin is not None:
-                    return self.last_decision or Decision(accepted=True, lane=LANE_UPGRADED_NETWORTH, path="PATH_B", flip=fin)
+                    return self.last_decision or Decision(
+                        accepted=True, lane=LANE_UPGRADED_NETWORTH, path="PATH_B", flip=fin
+                    )
                 return _reject("networth_capital_efficiency", lane=LANE_UPGRADED_NETWORTH, path="PATH_B")
             return _reject("networth_unprofitable", lane=LANE_UPGRADED_NETWORTH, path="PATH_B")
 

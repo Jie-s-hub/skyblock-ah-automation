@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from abc import ABC, abstractmethod
 import json
 import logging
+import random
+from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, Optional, Union
 
-import random
 import aiohttp
 
 from src.config import Settings
@@ -56,13 +56,7 @@ def normalize_auction_payload(raw: Union[dict[str, Any], str]) -> Optional[dict[
     if not uuid_val:
         return None
 
-    item_bytes = (
-        data.get("item_bytes")
-        or data.get("itemBytes")
-        or data.get("bytes")
-        or data.get("nbt")
-        or ""
-    )
+    item_bytes = data.get("item_bytes") or data.get("itemBytes") or data.get("bytes") or data.get("nbt") or ""
     if isinstance(item_bytes, dict):
         item_bytes = item_bytes.get("data", "")
 

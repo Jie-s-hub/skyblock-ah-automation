@@ -244,21 +244,32 @@ def test_cosmetic_items_rejected_in_evaluate_listing(base_config: Settings):
     evaluator = FlipEvaluator(base_config)
 
     # Populate cache with prices that would otherwise meet margin criteria
-    evaluator.set_price_cache({
-        "PET_SKIN_BABY_YETI_ICE": [20_000_000, 50_000_000, 55_000_000],
-        "DYE_NECRON": [50_000_000, 100_000_000, 110_000_000],
-        "RUNE_COUTURE": [2_000_000, 5_000_000, 6_000_000],
-        "WARDEN_HELMET_SKIN_DISCO": [40_000_000, 90_000_000, 95_000_000],
-        "MINION_SKIN_SANTA": [5_000_000, 12_000_000, 13_000_000],
-        "FURNITURE_CHAIR": [1_000_000, 3_000_000, 3_500_000],
-    })
+    evaluator.set_price_cache(
+        {
+            "PET_SKIN_BABY_YETI_ICE": [20_000_000, 50_000_000, 55_000_000],
+            "DYE_NECRON": [50_000_000, 100_000_000, 110_000_000],
+            "RUNE_COUTURE": [2_000_000, 5_000_000, 6_000_000],
+            "WARDEN_HELMET_SKIN_DISCO": [40_000_000, 90_000_000, 95_000_000],
+            "MINION_SKIN_SANTA": [5_000_000, 12_000_000, 13_000_000],
+            "FURNITURE_CHAIR": [1_000_000, 3_000_000, 3_500_000],
+        }
+    )
 
     cosmetic_candidates = [
-        ({"uuid": "c-1", "starting_bid": 20_000_000}, {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Skin"}),
+        (
+            {"uuid": "c-1", "starting_bid": 20_000_000},
+            {"internal_id": "PET_SKIN_BABY_YETI_ICE", "item_name": "Baby Yeti Skin"},
+        ),
         ({"uuid": "c-2", "starting_bid": 50_000_000}, {"internal_id": "DYE_NECRON", "item_name": "Necron Dye"}),
         ({"uuid": "c-3", "starting_bid": 2_000_000}, {"internal_id": "RUNE_COUTURE", "item_name": "Couture Rune"}),
-        ({"uuid": "c-4", "starting_bid": 40_000_000}, {"internal_id": "WARDEN_HELMET_SKIN_DISCO", "item_name": "Disco Warden Helmet Skin"}),
-        ({"uuid": "c-5", "starting_bid": 5_000_000}, {"internal_id": "MINION_SKIN_SANTA", "item_name": "Santa Minion Skin"}),
+        (
+            {"uuid": "c-4", "starting_bid": 40_000_000},
+            {"internal_id": "WARDEN_HELMET_SKIN_DISCO", "item_name": "Disco Warden Helmet Skin"},
+        ),
+        (
+            {"uuid": "c-5", "starting_bid": 5_000_000},
+            {"internal_id": "MINION_SKIN_SANTA", "item_name": "Santa Minion Skin"},
+        ),
         ({"uuid": "c-6", "starting_bid": 1_000_000}, {"internal_id": "FURNITURE_CHAIR", "item_name": "Chair"}),
     ]
 
@@ -270,11 +281,13 @@ def test_cosmetic_items_rejected_in_evaluate_listing(base_config: Settings):
 def test_core_weapons_and_armor_retained_in_evaluate_listing(base_config: Settings):
     """Verify core weapons and armor (RUNAAN_BOW, HYPERION, NECRON_CHESTPLATE) are retained and evaluated."""
     evaluator = FlipEvaluator(base_config)
-    evaluator.set_price_cache({
-        "RUNAAN_BOW": [2_000_000, 4_000_000, 4_500_000],
-        "HYPERION": [10_000_000, 15_000_000, 16_000_000],
-        "NECRON_CHESTPLATE": [20_000_000, 25_000_000, 26_000_000],
-    })
+    evaluator.set_price_cache(
+        {
+            "RUNAAN_BOW": [2_000_000, 4_000_000, 4_500_000],
+            "HYPERION": [10_000_000, 15_000_000, 16_000_000],
+            "NECRON_CHESTPLATE": [20_000_000, 25_000_000, 26_000_000],
+        }
+    )
 
     # 1. RUNAAN_BOW (Must not conflict with RUNE)
     runaan_res = evaluator.evaluate_listing(
@@ -409,10 +422,12 @@ def test_non_staple_rejection_at_8pct_margin_with_high_coin_profit(base_config: 
     # Recomputed by hand per Phase 1 fee model (10M-100M: 2% creation + 1% collection = 3%):
     # Buy at 20M, resell at 22.5M -> Net revenue 22,500,000 * 0.97 = 21,825,000.
     # Profit = 1,825,000 (>1M), margin = 1,825,000 / 20M = 9.125% (>=8% staple threshold, <15% standard threshold).
-    evaluator.set_price_cache({
-        "FARMING_TOOL": [20_000_000, 22_500_000, 23_000_000],
-        "NECRON_CHESTPLATE": [20_000_000, 22_500_000, 23_000_000],
-    })
+    evaluator.set_price_cache(
+        {
+            "FARMING_TOOL": [20_000_000, 22_500_000, 23_000_000],
+            "NECRON_CHESTPLATE": [20_000_000, 22_500_000, 23_000_000],
+        }
+    )
 
     # Non-staple fails because 9.125% < 15.0%
     non_staple_result = evaluator.evaluate_listing(
@@ -502,5 +517,3 @@ def test_progression_staples_taxonomy_dictionary():
     assert PROGRESSION_STAPLES["GIANTS_SWORD"] == "MIDGAME_COMBAT"
     assert PROGRESSION_STAPLES["GIANT_SWORD"] == "MIDGAME_COMBAT"
     assert len(PROGRESSION_STAPLES) >= 50
-
-

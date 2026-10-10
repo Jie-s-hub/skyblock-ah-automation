@@ -1,7 +1,7 @@
 """Unit and integration tests for SQLite persistence engine (src/db.py)."""
 
-import asyncio
 from pathlib import Path
+
 import pytest
 
 from src.db import DatabaseManager

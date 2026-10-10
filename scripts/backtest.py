@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import argparse
 import math
-from pathlib import Path
 import sys
 from dataclasses import dataclass
-from typing import Any, Optional
+from pathlib import Path
+from typing import Optional
 
 # Ensure project root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.constants.taxes import (
-    calculate_progressive_net_profit,
     net_revenue,
 )
-from src.db import DatabaseManager, get_db
+from src.db import DatabaseManager
 from src.evaluator import FlipEvaluator
 
 
@@ -151,7 +150,7 @@ class BacktestEngine:
             # Resale prediction accuracy metrics
             diff = float(realized_price - estimated_resell)
             absolute_errors.append(abs(diff))
-            squared_errors.append(diff ** 2)
+            squared_errors.append(diff**2)
 
             # Simulated capital execution
             if current_capital >= buy_price:

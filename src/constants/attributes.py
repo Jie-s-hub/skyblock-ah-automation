@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 # Recognized God Roll attribute combinations
 # Mage: Mana Pool + Mana Regeneration
@@ -45,8 +45,8 @@ ATTRIBUTE_DISPLAY_NAMES: dict[str, str] = {
 
 # Base estimated market value floors for God Roll pairings
 GOD_ROLL_BASE_VALUES: dict[str, int] = {
-    "MAGE": 120_000_000,          # Mana Pool + Mana Regen (highest demand Kuudra/Mage staple)
-    "SLAYER": 80_000_000,         # Magic Find + Veteran (Slayer progression)
+    "MAGE": 120_000_000,  # Mana Pool + Mana Regen (highest demand Kuudra/Mage staple)
+    "SLAYER": 80_000_000,  # Magic Find + Veteran (Slayer progression)
     "SURVIVABILITY": 50_000_000,  # Vitality + Dominance (Tank/Kuudra)
 }
 DEFAULT_GOD_ROLL_FLOOR = 50_000_000

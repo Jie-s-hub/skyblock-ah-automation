@@ -5,10 +5,10 @@ Sold-Comps Gating, and Anti-Domination Guards.
 
 from __future__ import annotations
 
-import json
 import random
 import time
 from typing import Any, Optional
+
 import pytest
 
 from src.config import Settings
@@ -16,10 +16,9 @@ from src.constants.pet_levels import (
     get_pet_bucket_key,
     get_pet_level_bracket,
     get_pet_max_level,
-    is_pet_xp_in_window,
 )
 from src.db import DatabaseManager
-from src.evaluator import FlipEvaluator, FlipResult
+from src.evaluator import FlipEvaluator
 
 
 @pytest.fixture
@@ -360,9 +359,7 @@ def test_candy_skin_held_item_and_tier_boost_bucket_isolation():
     _, candy = make_pet_fixture("p2", 5_000_000, level=1, candy=5)
     _, skin = make_pet_fixture("p3", 5_000_000, level=1, skin="GHOUL")
     _, held = make_pet_fixture("p4", 5_000_000, level=1, held_item="PET_ITEM_MINOS_RELIC")
-    _, tier_boost = make_pet_fixture(
-        "p5", 5_000_000, tier="EPIC", level=1, held_item="PET_ITEM_TIER_BOOST"
-    )
+    _, tier_boost = make_pet_fixture("p5", 5_000_000, tier="EPIC", level=1, held_item="PET_ITEM_TIER_BOOST")
 
     k_plain = get_pet_bucket_key(plain)
     k_candy = get_pet_bucket_key(candy)
@@ -428,15 +425,17 @@ def test_rejection_reason_codes_for_tie_domination_and_ghost_reference(test_db):
     # 3. Ghost/stale reference: reference listing is 16h old (>12h) at 15M, but comps P75 is 8M
     old_start = (time.time() - 16 * 3600) * 1000.0  # 16 hours old
     cand_ghost = make_pet_fixture("ghost-cand", 5_000_000, seller="good_seller")
-    stale_ref = make_pet_fixture("stale-ref", 15_000_000, seller="ghost_seller", start_ms=old_start)
+    _stale_ref = make_pet_fixture("stale-ref", 15_000_000, seller="ghost_seller", start_ms=old_start)
     # Put stale_ref directly in bucket to test ghost guard
     b_key = get_pet_bucket_key(cand_ghost[1])
-    evaluator.set_pet_bucket_cache({
-        b_key: [
-            {"uuid": "ghost-cand", "price": 5_000_000, "xp": 0.0, "start": time.time() * 1000.0},
-            {"uuid": "stale-ref", "price": 15_000_000, "xp": 0.0, "start": old_start},
-        ]
-    })
+    evaluator.set_pet_bucket_cache(
+        {
+            b_key: [
+                {"uuid": "ghost-cand", "price": 5_000_000, "xp": 0.0, "start": time.time() * 1000.0},
+                {"uuid": "stale-ref", "price": 15_000_000, "xp": 0.0, "start": old_start},
+            ]
+        }
+    )
     res_ghost = evaluator.evaluate_listing(cand_ghost[0], cand_ghost[1])
     assert res_ghost is None
     assert evaluator.get_last_pet_rejection_reason("ghost-cand") == "GHOST_REFERENCE"
@@ -483,6 +482,7 @@ def test_margin_above_review_cap_yields_low_confidence(test_db):
 # ============================================================================
 # Phase 2e: Pytest Regressions
 # ============================================================================
+
 
 def test_regression_goblin_12_listings_no_comps(test_db):
     """
@@ -558,7 +558,15 @@ def test_regression_goblin_12_listings_plus_older_listing(test_db):
         for i in range(12)
     ]
     batch.append(
-        make_pet_fixture("goblin-old", 9_200_000, seller="seller-old", pet_type="GOBLIN", tier="LEGENDARY", level=1, start_ms=old_start)
+        make_pet_fixture(
+            "goblin-old",
+            9_200_000,
+            seller="seller-old",
+            pet_type="GOBLIN",
+            tier="LEGENDARY",
+            level=1,
+            start_ms=old_start,
+        )
     )
     evaluator.update_cache(batch)
 
@@ -595,7 +603,9 @@ def test_regression_goblin_3m_listing_with_tight_comps(test_db):
         evaluator.derpy_active = derpy
 
         cand = make_pet_fixture("cand-3m", 3_000_000, seller="sellerA", pet_type="GOBLIN", tier="LEGENDARY", level=1)
-        other_ref = make_pet_fixture("other-5.2m", 5_200_000, seller="sellerB", pet_type="GOBLIN", tier="LEGENDARY", level=1)
+        other_ref = make_pet_fixture(
+            "other-5.2m", 5_200_000, seller="sellerB", pet_type="GOBLIN", tier="LEGENDARY", level=1
+        )
 
         evaluator.update_cache([cand, other_ref])
 

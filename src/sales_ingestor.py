@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import time
 from typing import Any, Optional
@@ -20,10 +19,24 @@ def extract_high_tier_enchants(enchantments: dict[str, int]) -> list[tuple[str, 
     valuable: list[tuple[str, int]] = []
     for name, lvl in sorted(enchantments.items()):
         name_clean = name.strip().lower()
-        if "ultimate" in name_clean or lvl >= 6 or name_clean in {
-            "soul_eater", "wisdom", "legion", "chimera", "one_for_all",
-            "swarm", "fatal_tempo", "rend", "combo", "overload", "rejuvenate"
-        }:
+        if (
+            "ultimate" in name_clean
+            or lvl >= 6
+            or name_clean
+            in {
+                "soul_eater",
+                "wisdom",
+                "legion",
+                "chimera",
+                "one_for_all",
+                "swarm",
+                "fatal_tempo",
+                "rend",
+                "combo",
+                "overload",
+                "rejuvenate",
+            }
+        ):
             valuable.append((name_clean, int(lvl)))
     return valuable
 

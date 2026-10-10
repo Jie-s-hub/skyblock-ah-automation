@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 # Crimson Isle prestige tiers ordered by ascending tier
 PRESTIGE_TIERS: list[str] = [
     "BASIC",

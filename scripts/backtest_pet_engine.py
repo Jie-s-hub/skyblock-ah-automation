@@ -8,16 +8,15 @@ Evaluates historical pet scenarios through:
 from __future__ import annotations
 
 import math
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 # Ensure project root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import Settings
-from src.constants.pet_levels import get_pet_bucket_key
 from src.db import DatabaseManager
 from src.evaluator import FlipEvaluator
 
@@ -58,11 +57,66 @@ def build_scenario_dataset() -> list[dict[str, Any]]:
                 },
             },
             "market_batch": [
-                ({"uuid": "goblin-1", "starting_bid": 4_999_999, "auctioneer": "sellerA", "start": now}, {"internal_id": "PET_GOBLIN_LEGENDARY", "is_pet": True, "pet_type": "GOBLIN", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "goblin-2", "starting_bid": 4_999_999, "auctioneer": "sellerB", "start": now}, {"internal_id": "PET_GOBLIN_LEGENDARY", "is_pet": True, "pet_type": "GOBLIN", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "goblin-3", "starting_bid": 4_999_999, "auctioneer": "sellerC", "start": now}, {"internal_id": "PET_GOBLIN_LEGENDARY", "is_pet": True, "pet_type": "GOBLIN", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "goblin-4", "starting_bid": 4_999_999, "auctioneer": "sellerD", "start": now}, {"internal_id": "PET_GOBLIN_LEGENDARY", "is_pet": True, "pet_type": "GOBLIN", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "goblin-5", "starting_bid": 9_200_000, "auctioneer": "sellerE", "start": now}, {"internal_id": "PET_GOBLIN_LEGENDARY", "is_pet": True, "pet_type": "GOBLIN", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
+                (
+                    {"uuid": "goblin-1", "starting_bid": 4_999_999, "auctioneer": "sellerA", "start": now},
+                    {
+                        "internal_id": "PET_GOBLIN_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GOBLIN",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "goblin-2", "starting_bid": 4_999_999, "auctioneer": "sellerB", "start": now},
+                    {
+                        "internal_id": "PET_GOBLIN_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GOBLIN",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "goblin-3", "starting_bid": 4_999_999, "auctioneer": "sellerC", "start": now},
+                    {
+                        "internal_id": "PET_GOBLIN_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GOBLIN",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "goblin-4", "starting_bid": 4_999_999, "auctioneer": "sellerD", "start": now},
+                    {
+                        "internal_id": "PET_GOBLIN_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GOBLIN",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "goblin-5", "starting_bid": 9_200_000, "auctioneer": "sellerE", "start": now},
+                    {
+                        "internal_id": "PET_GOBLIN_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GOBLIN",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
             ],
             "comps": [5_000_000, 5_000_000, 5_100_000, 5_050_000, 4_999_999, 5_150_000],
             "realized_resale": 5_000_000,
@@ -87,8 +141,30 @@ def build_scenario_dataset() -> list[dict[str, Any]]:
                 },
             },
             "market_batch": [
-                ({"uuid": "ws-l1", "starting_bid": 4_500_000, "auctioneer": "seller1", "start": now}, {"internal_id": "PET_WITHER_SKELETON_LEGENDARY", "is_pet": True, "pet_type": "WITHER_SKELETON", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "ws-l85", "starting_bid": 20_000_000, "auctioneer": "seller2", "start": now}, {"internal_id": "PET_WITHER_SKELETON_LEGENDARY", "is_pet": True, "pet_type": "WITHER_SKELETON", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 85, "pet_exp": 12_000_000.0}),
+                (
+                    {"uuid": "ws-l1", "starting_bid": 4_500_000, "auctioneer": "seller1", "start": now},
+                    {
+                        "internal_id": "PET_WITHER_SKELETON_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "WITHER_SKELETON",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "ws-l85", "starting_bid": 20_000_000, "auctioneer": "seller2", "start": now},
+                    {
+                        "internal_id": "PET_WITHER_SKELETON_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "WITHER_SKELETON",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 85,
+                        "pet_exp": 12_000_000.0,
+                    },
+                ),
             ],
             "comps": [4_600_000, 4_500_000, 4_700_000, 4_650_000, 4_550_000, 4_600_000],
             "realized_resale": 4_600_000,
@@ -113,9 +189,42 @@ def build_scenario_dataset() -> list[dict[str, Any]]:
                 },
             },
             "market_batch": [
-                ({"uuid": "yeti-l100", "starting_bid": 22_000_000, "auctioneer": "sellerA", "start": now}, {"internal_id": "PET_BABY_YETI_LEGENDARY", "is_pet": True, "pet_type": "BABY_YETI", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 100, "pet_exp": 25_353_230.0}),
-                ({"uuid": "yeti-ref-1", "starting_bid": 34_000_000, "auctioneer": "sellerB", "start": now}, {"internal_id": "PET_BABY_YETI_LEGENDARY", "is_pet": True, "pet_type": "BABY_YETI", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 100, "pet_exp": 25_353_230.0}),
-                ({"uuid": "yeti-ref-2", "starting_bid": 35_000_000, "auctioneer": "sellerC", "start": now}, {"internal_id": "PET_BABY_YETI_LEGENDARY", "is_pet": True, "pet_type": "BABY_YETI", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 100, "pet_exp": 25_353_230.0}),
+                (
+                    {"uuid": "yeti-l100", "starting_bid": 22_000_000, "auctioneer": "sellerA", "start": now},
+                    {
+                        "internal_id": "PET_BABY_YETI_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "BABY_YETI",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 100,
+                        "pet_exp": 25_353_230.0,
+                    },
+                ),
+                (
+                    {"uuid": "yeti-ref-1", "starting_bid": 34_000_000, "auctioneer": "sellerB", "start": now},
+                    {
+                        "internal_id": "PET_BABY_YETI_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "BABY_YETI",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 100,
+                        "pet_exp": 25_353_230.0,
+                    },
+                ),
+                (
+                    {"uuid": "yeti-ref-2", "starting_bid": 35_000_000, "auctioneer": "sellerC", "start": now},
+                    {
+                        "internal_id": "PET_BABY_YETI_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "BABY_YETI",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 100,
+                        "pet_exp": 25_353_230.0,
+                    },
+                ),
             ],
             "comps": [33_500_000, 34_000_000, 34_200_000, 34_000_000, 34_500_000, 34_100_000],
             "realized_resale": 34_000_000,
@@ -140,8 +249,32 @@ def build_scenario_dataset() -> list[dict[str, Any]]:
                 },
             },
             "market_batch": [
-                ({"uuid": "candy-pet", "starting_bid": 20_000_000, "auctioneer": "sellerA", "start": now}, {"internal_id": "PET_BLACK_CAT_LEGENDARY", "is_pet": True, "pet_type": "BLACK_CAT", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 100, "pet_exp": 25_353_230.0, "pet_candy_used": 10}),
-                ({"uuid": "clean-pet", "starting_bid": 25_000_000, "auctioneer": "sellerB", "start": now}, {"internal_id": "PET_BLACK_CAT_LEGENDARY", "is_pet": True, "pet_type": "BLACK_CAT", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 100, "pet_exp": 25_353_230.0, "pet_candy_used": 0}),
+                (
+                    {"uuid": "candy-pet", "starting_bid": 20_000_000, "auctioneer": "sellerA", "start": now},
+                    {
+                        "internal_id": "PET_BLACK_CAT_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "BLACK_CAT",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 100,
+                        "pet_exp": 25_353_230.0,
+                        "pet_candy_used": 10,
+                    },
+                ),
+                (
+                    {"uuid": "clean-pet", "starting_bid": 25_000_000, "auctioneer": "sellerB", "start": now},
+                    {
+                        "internal_id": "PET_BLACK_CAT_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "BLACK_CAT",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 100,
+                        "pet_exp": 25_353_230.0,
+                        "pet_candy_used": 0,
+                    },
+                ),
             ],
             # No candied comps exist -> BUCKET_NO_MATCH
             "comps": [],
@@ -167,8 +300,35 @@ def build_scenario_dataset() -> list[dict[str, Any]]:
                 },
             },
             "market_batch": [
-                ({"uuid": "ghost-cand", "starting_bid": 5_000_000, "auctioneer": "sellerA", "start": now}, {"internal_id": "PET_SHEEP_LEGENDARY", "is_pet": True, "pet_type": "SHEEP", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "ghost-ref", "starting_bid": 20_000_000, "auctioneer": "ghostSeller", "start": stale_start}, {"internal_id": "PET_SHEEP_LEGENDARY", "is_pet": True, "pet_type": "SHEEP", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
+                (
+                    {"uuid": "ghost-cand", "starting_bid": 5_000_000, "auctioneer": "sellerA", "start": now},
+                    {
+                        "internal_id": "PET_SHEEP_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "SHEEP",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {
+                        "uuid": "ghost-ref",
+                        "starting_bid": 20_000_000,
+                        "auctioneer": "ghostSeller",
+                        "start": stale_start,
+                    },
+                    {
+                        "internal_id": "PET_SHEEP_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "SHEEP",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
             ],
             "comps": [8_000_000, 8_100_000, 8_050_000, 8_200_000, 7_950_000, 8_150_000],
             "realized_resale": 8_100_000,
@@ -193,10 +353,54 @@ def build_scenario_dataset() -> list[dict[str, Any]]:
                 },
             },
             "market_batch": [
-                ({"uuid": "dom-cand", "starting_bid": 5_000_000, "auctioneer": "snipeGuy", "start": now}, {"internal_id": "PET_SILVERFISH_LEGENDARY", "is_pet": True, "pet_type": "SILVERFISH", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "dom-1", "starting_bid": 15_000_000, "auctioneer": "cartel", "start": now}, {"internal_id": "PET_SILVERFISH_LEGENDARY", "is_pet": True, "pet_type": "SILVERFISH", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "dom-2", "starting_bid": 15_500_000, "auctioneer": "cartel", "start": now}, {"internal_id": "PET_SILVERFISH_LEGENDARY", "is_pet": True, "pet_type": "SILVERFISH", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "dom-3", "starting_bid": 16_000_000, "auctioneer": "cartel", "start": now}, {"internal_id": "PET_SILVERFISH_LEGENDARY", "is_pet": True, "pet_type": "SILVERFISH", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
+                (
+                    {"uuid": "dom-cand", "starting_bid": 5_000_000, "auctioneer": "snipeGuy", "start": now},
+                    {
+                        "internal_id": "PET_SILVERFISH_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "SILVERFISH",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "dom-1", "starting_bid": 15_000_000, "auctioneer": "cartel", "start": now},
+                    {
+                        "internal_id": "PET_SILVERFISH_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "SILVERFISH",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "dom-2", "starting_bid": 15_500_000, "auctioneer": "cartel", "start": now},
+                    {
+                        "internal_id": "PET_SILVERFISH_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "SILVERFISH",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "dom-3", "starting_bid": 16_000_000, "auctioneer": "cartel", "start": now},
+                    {
+                        "internal_id": "PET_SILVERFISH_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "SILVERFISH",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
             ],
             "comps": [15_000_000, 15_200_000, 15_100_000, 15_000_000, 15_300_000, 15_100_000],
             "realized_resale": 5_200_000,  # Real market was 5.2M, 15M was artificial manipulation
@@ -221,8 +425,30 @@ def build_scenario_dataset() -> list[dict[str, Any]]:
                 },
             },
             "market_batch": [
-                ({"uuid": "thin-cand", "starting_bid": 10_000_000, "auctioneer": "sellerA", "start": now}, {"internal_id": "PET_GIRAFFE_LEGENDARY", "is_pet": True, "pet_type": "GIRAFFE", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "thin-ref", "starting_bid": 18_000_000, "auctioneer": "sellerB", "start": now}, {"internal_id": "PET_GIRAFFE_LEGENDARY", "is_pet": True, "pet_type": "GIRAFFE", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
+                (
+                    {"uuid": "thin-cand", "starting_bid": 10_000_000, "auctioneer": "sellerA", "start": now},
+                    {
+                        "internal_id": "PET_GIRAFFE_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GIRAFFE",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "thin-ref", "starting_bid": 18_000_000, "auctioneer": "sellerB", "start": now},
+                    {
+                        "internal_id": "PET_GIRAFFE_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GIRAFFE",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
             ],
             "comps": [18_000_000, 18_500_000],  # only 2 comps
             "realized_resale": 10_500_000,
@@ -247,9 +473,42 @@ def build_scenario_dataset() -> list[dict[str, Any]]:
                 },
             },
             "market_batch": [
-                ({"uuid": "goblin-snipe", "starting_bid": 6_500_000, "auctioneer": "sellerA", "start": now}, {"internal_id": "PET_GOBLIN_LEGENDARY", "is_pet": True, "pet_type": "GOBLIN", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "goblin-ref1", "starting_bid": 8_700_000, "auctioneer": "sellerB", "start": now}, {"internal_id": "PET_GOBLIN_LEGENDARY", "is_pet": True, "pet_type": "GOBLIN", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
-                ({"uuid": "goblin-ref2", "starting_bid": 9_500_000, "auctioneer": "sellerC", "start": now}, {"internal_id": "PET_GOBLIN_LEGENDARY", "is_pet": True, "pet_type": "GOBLIN", "pet_tier": "LEGENDARY", "effective_tier": "LEGENDARY", "pet_level": 1, "pet_exp": 0.0}),
+                (
+                    {"uuid": "goblin-snipe", "starting_bid": 6_500_000, "auctioneer": "sellerA", "start": now},
+                    {
+                        "internal_id": "PET_GOBLIN_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GOBLIN",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "goblin-ref1", "starting_bid": 8_700_000, "auctioneer": "sellerB", "start": now},
+                    {
+                        "internal_id": "PET_GOBLIN_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GOBLIN",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
+                (
+                    {"uuid": "goblin-ref2", "starting_bid": 9_500_000, "auctioneer": "sellerC", "start": now},
+                    {
+                        "internal_id": "PET_GOBLIN_LEGENDARY",
+                        "is_pet": True,
+                        "pet_type": "GOBLIN",
+                        "pet_tier": "LEGENDARY",
+                        "effective_tier": "LEGENDARY",
+                        "pet_level": 1,
+                        "pet_exp": 0.0,
+                    },
+                ),
             ],
             "comps": [8_500_000, 8_550_000, 8_600_000, 8_650_000, 8_700_000, 8_800_000],
             "realized_resale": 8_700_000,
@@ -322,30 +581,34 @@ def run_evaluation_pass(enable_bucket_engine: bool) -> dict[str, Any]:
             is_hit = realized >= (est_target * 0.98)
             if is_hit:
                 hits += 1
-            alert_details.append({
-                "scenario": sc["name"],
-                "alerted": True,
-                "target": est_target,
-                "realized": realized,
-                "error": error,
-                "is_hit": is_hit,
-                "rejection": None,
-            })
+            alert_details.append(
+                {
+                    "scenario": sc["name"],
+                    "alerted": True,
+                    "target": est_target,
+                    "realized": realized,
+                    "error": error,
+                    "is_hit": is_hit,
+                    "rejection": None,
+                }
+            )
         else:
             rejection = evaluator.get_last_pet_rejection_reason(cand["auction"]["uuid"])
-            alert_details.append({
-                "scenario": sc["name"],
-                "alerted": False,
-                "target": None,
-                "realized": realized,
-                "error": 0.0,
-                "is_hit": False,
-                "rejection": rejection or "FILTERED",
-            })
+            alert_details.append(
+                {
+                    "scenario": sc["name"],
+                    "alerted": False,
+                    "target": None,
+                    "realized": realized,
+                    "error": 0.0,
+                    "is_hit": False,
+                    "rejection": rejection or "FILTERED",
+                }
+            )
 
     hit_rate = (hits / alerts_fired * 100.0) if alerts_fired > 0 else 0.0
     mae = (sum(errors) / len(errors)) if errors else 0.0
-    rmse = math.sqrt(sum(e ** 2 for e in errors) / len(errors)) if errors else 0.0
+    rmse = math.sqrt(sum(e**2 for e in errors) / len(errors)) if errors else 0.0
 
     return {
         "engine_mode": "NEW (Bucket Engine)" if enable_bucket_engine else "OLD (Legacy Heuristic)",
@@ -372,14 +635,24 @@ def main():
     print(f"{'Total Evaluated Scenarios':<35} | {before['total_scenarios']:<20} | {after['total_scenarios']:<20}")
     print(f"{'Total Alerts Fired':<35} | {before['alerts_fired']:<20} | {after['alerts_fired']:<20}")
     print(f"{'Successful Arbitrage Hits':<35} | {before['hits']:<20} | {after['hits']:<20}")
-    print(f"{'Hit Rate (Realized >= Target)':<35} | {before['hit_rate_pct']}%{'':<14} | {after['hit_rate_pct']}%{'':<14}")
-    print(f"{'Mean Absolute Error (coins)':<35} | {before['mean_absolute_error']:>14,.0f} coins | {after['mean_absolute_error']:>14,.0f} coins")
-    print(f"{'Root Mean Sq Error (coins)':<35} | {before['root_mean_squared_error']:>14,.0f} coins | {after['root_mean_squared_error']:>14,.0f} coins")
+    print(
+        f"{'Hit Rate (Realized >= Target)':<35} | {before['hit_rate_pct']}%{'':<14} | {after['hit_rate_pct']}%{'':<14}"
+    )
+    print(
+        f"{'Mean Absolute Error (coins)':<35} | {before['mean_absolute_error']:>14,.0f} coins | {after['mean_absolute_error']:>14,.0f} coins"
+    )
+    print(
+        f"{'Root Mean Sq Error (coins)':<35} | {before['root_mean_squared_error']:>14,.0f} coins | {after['root_mean_squared_error']:>14,.0f} coins"
+    )
     print("-" * 80)
 
     print("\nScenario Breakdown (AFTER):")
     for d in after["details"]:
-        status = f"ALERT (Target: {d['target']:,}, Realized: {d['realized']:,})" if d["alerted"] else f"REJECTED [{d['rejection']}]"
+        status = (
+            f"ALERT (Target: {d['target']:,}, Realized: {d['realized']:,})"
+            if d["alerted"]
+            else f"REJECTED [{d['rejection']}]"
+        )
         print(f"  - {d['scenario']:<45}: {status}")
 
     print("\n" + "=" * 80)

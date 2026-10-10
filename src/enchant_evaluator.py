@@ -87,11 +87,7 @@ def get_enchant_bazaar_candidates(enchant_name: str, tier: int) -> list[str]:
         return [f"ENCHANTMENT_ULTIMATE_ONE_FOR_ALL_{tier}", "ENCHANTMENT_ULTIMATE_ONE_FOR_ALL_1"]
 
     candidates: list[str] = []
-    if (
-        clean_upper.startswith("ULTIMATE_")
-        or norm_lower in ULTIMATE_ENCHANTS
-        or norm_no_ult in ULTIMATE_ENCHANTS
-    ):
+    if clean_upper.startswith("ULTIMATE_") or norm_lower in ULTIMATE_ENCHANTS or norm_no_ult in ULTIMATE_ENCHANTS:
         candidates.append(f"ENCHANTMENT_{name_with_ult}_{tier}")
         candidates.append(f"ENCHANTMENT_{name_no_ult}_{tier}")
     else:
