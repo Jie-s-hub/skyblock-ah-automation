@@ -159,6 +159,16 @@ class SalesIngestor:
             features_hash = generate_features_hash(decoded)
             normalized_tier = int(decoded.get("dungeon_stars", 0)) + int(decoded.get("master_stars", 0))
 
+            time_to_sell_s: Optional[float] = None
+            raw_start = auction.get("start")
+            if raw_start is not None:
+                try:
+                    s_val = float(raw_start)
+                    start_ms = s_val if s_val > 1e11 else (s_val * 1000.0)
+                    time_to_sell_s = max(0.0, (timestamp - start_ms) / 1000.0)
+                except (ValueError, TypeError):
+                    pass
+
             success = self.db.record_sale(
                 uuid=auction_uuid,
                 internal_id=internal_id,
@@ -169,6 +179,7 @@ class SalesIngestor:
                 features_json=decoded,
                 features_hash=features_hash,
                 normalized_tier=normalized_tier,
+                time_to_sell_s=time_to_sell_s,
             )
             if success:
                 ingested_count += 1

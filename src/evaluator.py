@@ -155,6 +155,9 @@ class FlipResult(BaseModel):
     decision: Optional[Any] = Field(default=None, repr=False)
     trace_json: Optional[str] = None
 
+    # Phase 4 Start Timestamp Persistence
+    listing_start: Optional[int] = None
+
 
 class Decision(BaseModel):
     """
@@ -1979,6 +1982,7 @@ class FlipEvaluator:
             flip.suggested_list_price = best_res.list_price
         flip.derpy_active = self.derpy_active
         flip.fee_model_version = 2
+        flip.listing_start = flip.listing_start or getattr(self, "_current_auction_start", None)
 
         if getattr(self.config, "ENABLE_CAPITAL_EFFICIENCY", True):
             from src.ranking import score_and_rank_flip
@@ -2010,6 +2014,7 @@ class FlipEvaluator:
                 "confidence_score": flip.confidence_score,
                 "comp_count": flip.comp_count,
                 "comp_median": flip.comp_median,
+                "listing_start": flip.listing_start,
                 "capital_efficiency": flip.capital_efficiency,
                 "estimated_hold_hours": flip.estimated_hold_hours,
                 "craft_cost": flip.craft_cost,
@@ -2038,11 +2043,24 @@ class FlipEvaluator:
         uuid = str(auction.get("uuid", ""))
         buy_price = int(auction.get("starting_bid", 0))
         internal_id = decoded_data.get("internal_id")
+
+        raw_start = auction.get("start")
+        start_ms: Optional[int] = None
+        if raw_start is not None:
+            try:
+                s_val = float(raw_start)
+                start_ms = int(s_val if s_val > 1e11 else (s_val * 1000.0))
+            except (ValueError, TypeError):
+                start_ms = None
+        self._current_auction_start = start_ms
+
         intermediates: dict[str, Any] = {
             "uuid": uuid,
             "buy_price": buy_price,
             "internal_id": internal_id,
         }
+        if start_ms is not None:
+            intermediates["listing_start"] = start_ms
 
         def _reject(reason: str, lane: str = LANE_FLOOR, path: str = "UNKNOWN") -> Decision:
             dec = Decision(

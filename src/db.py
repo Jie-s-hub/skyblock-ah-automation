@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     last_checked_timestamp INTEGER DEFAULT 0,
     derpy_active INTEGER DEFAULT 0,
     fee_model_version INTEGER DEFAULT 2,
-    trace_json TEXT
+    trace_json TEXT,
+    listing_start INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_item_time ON alerts(internal_id, timestamp);
 
@@ -68,7 +69,8 @@ CREATE TABLE IF NOT EXISTS sales_history (
     timestamp INTEGER NOT NULL,
     features_json TEXT NOT NULL,
     features_hash TEXT NOT NULL,
-    normalized_tier INTEGER NOT NULL DEFAULT 0
+    normalized_tier INTEGER NOT NULL DEFAULT 0,
+    time_to_sell_s REAL
 );
 CREATE INDEX IF NOT EXISTS idx_sales_item_time ON sales_history(internal_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_sales_buyer_time ON sales_history(buyer_uuid, timestamp);
@@ -105,6 +107,35 @@ CREATE TABLE IF NOT EXISTS retention_params (
     fitted_retention REAL NOT NULL,
     updated_at INTEGER NOT NULL
 );
+
+-- 7. Live Listings Active Tracking (Phase 4)
+CREATE TABLE IF NOT EXISTS live_listings (
+    uuid TEXT PRIMARY KEY,
+    start_time INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_live_listings_start ON live_listings(start_time);
+
+-- 8. Alert Outcomes & Calibration (Phase 4)
+CREATE TABLE IF NOT EXISTS alert_outcomes (
+    alert_id INTEGER,
+    auction_uuid TEXT NOT NULL,
+    lane TEXT NOT NULL,
+    path TEXT NOT NULL,
+    bucket_key TEXT,
+    buy_price INTEGER NOT NULL,
+    target_price INTEGER NOT NULL,
+    confidence_score REAL,
+    label TEXT NOT NULL,
+    alerted_at INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    listing_sold_after_s REAL,
+    target_hit INTEGER NOT NULL DEFAULT 0,
+    realized_net_margin REAL,
+    evaluated_at INTEGER NOT NULL,
+    PRIMARY KEY (alert_id, auction_uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_lane_label ON alert_outcomes(lane, label);
+CREATE INDEX IF NOT EXISTS idx_outcomes_uuid ON alert_outcomes(auction_uuid);
 """
 
 
@@ -179,6 +210,18 @@ class DatabaseManager:
                 except sqlite3.OperationalError:
                     pass
                 conn.execute("PRAGMA user_version = 3;")
+
+            # Phase 4 Migration: time_to_sell_s on sales_history, listing_start on alerts, user_version = 4
+            if curr_version < 4:
+                try:
+                    conn.execute("ALTER TABLE sales_history ADD COLUMN time_to_sell_s REAL;")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE alerts ADD COLUMN listing_start INTEGER;")
+                except sqlite3.OperationalError:
+                    pass
+                conn.execute("PRAGMA user_version = 4;")
         logger.debug("Database initialized with WAL mode at: %s", self.db_path)
 
     def close(self) -> None:
@@ -209,6 +252,7 @@ class DatabaseManager:
         derpy_active: int = 0,
         fee_model_version: int = 2,
         trace_json: Optional[str | dict[str, Any]] = None,
+        listing_start: Optional[int] = None,
     ) -> bool:
         """Insert or ignore an arbitrage alert."""
         conn = self._get_connection()
@@ -236,8 +280,8 @@ class DatabaseManager:
             auction_uuid, timestamp, internal_id, buy_price,
             estimated_resell, projected_profit, margin_pct,
             confidence_label, valuation_path, features_json,
-            derpy_active, fee_model_version, trace_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            derpy_active, fee_model_version, trace_json, listing_start
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         try:
             with conn:
@@ -257,6 +301,7 @@ class DatabaseManager:
                         int(derpy_active),
                         int(fee_model_version),
                         trace_str,
+                        listing_start,
                     ),
                 )
                 return cur.rowcount > 0
@@ -586,6 +631,7 @@ class DatabaseManager:
         features_json: Optional[str | dict[str, Any]] = None,
         features_hash: str = "",
         normalized_tier: int = 0,
+        time_to_sell_s: Optional[float] = None,
     ) -> bool:
         """Insert or ignore a completed auction from auctions_ended."""
         conn = self._get_connection()
@@ -595,11 +641,17 @@ class DatabaseManager:
             else json.dumps(features_json or {}, separators=(",", ":"))
         )
 
+        # Join with live listing start timestamp if not explicitly passed
+        if time_to_sell_s is None and uuid:
+            live_start = self.get_live_listing_start(uuid)
+            if live_start is not None and live_start > 0:
+                time_to_sell_s = max(0.0, (int(timestamp) - live_start) / 1000.0)
+
         query = """
         INSERT OR IGNORE INTO sales_history (
             uuid, internal_id, price, buyer_uuid, seller_uuid,
-            timestamp, features_json, features_hash, normalized_tier
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            timestamp, features_json, features_hash, normalized_tier, time_to_sell_s
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         try:
             with conn:
@@ -615,6 +667,7 @@ class DatabaseManager:
                         feat_str,
                         features_hash,
                         int(normalized_tier),
+                        time_to_sell_s,
                     ),
                 )
                 return cur.rowcount > 0
@@ -624,6 +677,15 @@ class DatabaseManager:
 
     async def async_record_sale(self, **kwargs: Any) -> bool:
         return await asyncio.to_thread(self.record_sale, **kwargs)
+
+    def get_sale(self, uuid: str) -> Optional[dict[str, Any]]:
+        """Retrieve completed sale by auction UUID."""
+        if not uuid:
+            return None
+        conn = self._get_connection()
+        cur = conn.execute("SELECT * FROM sales_history WHERE uuid = ?", (uuid,))
+        row = cur.fetchone()
+        return dict(row) if row else None
 
     def get_sales(
         self,
@@ -814,6 +876,140 @@ class DatabaseManager:
         """Retrieve all fitted retention records."""
         conn = self._get_connection()
         cur = conn.execute("SELECT * FROM retention_params ORDER BY updated_at DESC")
+        return [dict(r) for r in cur.fetchall()]
+
+    # -----------------------------------------------------------------------
+    # 7. Live Listings Table Operations (Phase 4)
+    # -----------------------------------------------------------------------
+
+    def record_live_listings(self, listings: list[tuple[str, int]]) -> int:
+        """Batch insert live listings with their start timestamps."""
+        if not listings:
+            return 0
+        conn = self._get_connection()
+        try:
+            with conn:
+                cur = conn.executemany(
+                    "INSERT OR IGNORE INTO live_listings (uuid, start_time) VALUES (?, ?);",
+                    listings,
+                )
+                return cur.rowcount
+        except Exception as e:
+            logger.error("Failed to record live listings: %s", e)
+            return 0
+
+    def get_live_listing_start(self, uuid: str) -> Optional[int]:
+        """Get the start timestamp (ms) for a live listing uuid."""
+        if not uuid:
+            return None
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("SELECT start_time FROM live_listings WHERE uuid = ?", (uuid,))
+            row = cur.fetchone()
+            return int(row["start_time"]) if row else None
+        except Exception:
+            return None
+
+    # -----------------------------------------------------------------------
+    # 8. Alert Outcomes Operations (Phase 4)
+    # -----------------------------------------------------------------------
+
+    def record_alert_outcome(
+        self,
+        alert_id: Optional[int],
+        auction_uuid: str,
+        lane: str,
+        path: str,
+        bucket_key: Optional[str],
+        buy_price: int,
+        target_price: int,
+        confidence_score: Optional[float],
+        label: str,
+        alerted_at: int,
+        status: str,
+        listing_sold_after_s: Optional[float],
+        target_hit: int,
+        realized_net_margin: Optional[float],
+        evaluated_at: Optional[int] = None,
+    ) -> bool:
+        """Insert or replace an outcome label for an alert."""
+        conn = self._get_connection()
+        eval_ts = evaluated_at if evaluated_at is not None else int(time.time() * 1000)
+        query = """
+        INSERT OR REPLACE INTO alert_outcomes (
+            alert_id, auction_uuid, lane, path, bucket_key,
+            buy_price, target_price, confidence_score, label,
+            alerted_at, status, listing_sold_after_s, target_hit,
+            realized_net_margin, evaluated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        try:
+            with conn:
+                conn.execute(
+                    query,
+                    (
+                        alert_id,
+                        auction_uuid,
+                        lane,
+                        path,
+                        bucket_key,
+                        int(buy_price),
+                        int(target_price),
+                        float(confidence_score) if confidence_score is not None else None,
+                        label,
+                        int(alerted_at),
+                        status,
+                        float(listing_sold_after_s) if listing_sold_after_s is not None else None,
+                        int(target_hit),
+                        float(realized_net_margin) if realized_net_margin is not None else None,
+                        int(eval_ts),
+                    ),
+                )
+                return True
+        except Exception as e:
+            logger.error("Failed to record alert outcome for %s: %s", auction_uuid, e)
+            return False
+
+    def get_pending_alerts_for_outcomes(
+        self,
+        horizon_ms: int,
+        now_ms: Optional[int] = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Retrieve alerts older than horizon_ms that do not yet have an outcome label."""
+        conn = self._get_connection()
+        cur_ts = now_ms if now_ms is not None else int(time.time() * 1000)
+        cutoff_ts = cur_ts - horizon_ms
+        query = """
+        SELECT a.* FROM alerts a
+        LEFT JOIN alert_outcomes o ON a.auction_uuid = o.auction_uuid
+        WHERE a.timestamp <= ? AND o.auction_uuid IS NULL
+        ORDER BY a.timestamp ASC
+        LIMIT ?
+        """
+        cur = conn.execute(query, (cutoff_ts, limit))
+        return [dict(r) for r in cur.fetchall()]
+
+    def get_alert_outcomes(
+        self,
+        lane: Optional[str] = None,
+        label: Optional[str] = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Retrieve recorded alert outcomes with optional lane/label filter."""
+        conn = self._get_connection()
+        clauses = []
+        params: list[Any] = []
+        if lane:
+            clauses.append("lane = ?")
+            params.append(lane)
+        if label:
+            clauses.append("label = ?")
+            params.append(label)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"SELECT * FROM alert_outcomes {where} ORDER BY evaluated_at DESC LIMIT ?"
+        params.append(limit)
+        cur = conn.execute(query, tuple(params))
         return [dict(r) for r in cur.fetchall()]
 
 

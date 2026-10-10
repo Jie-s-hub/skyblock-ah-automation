@@ -119,6 +119,10 @@ def net_revenue(
     return price - creation_fee(price) - collection_fee(price, derpy_active=derpy_active, derpy_rate=derpy_rate)
 
 
+# Backwards compatibility alias
+calculate_net_revenue = net_revenue
+
+
 class BestResaleResult(NamedTuple):
     """Result container for tax cliff optimized resale."""
     net_revenue: int

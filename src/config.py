@@ -484,6 +484,20 @@ class Settings(BaseSettings):
         description="TTL in seconds for caching Hypixel mayor election API response (default: 600s / 10m)",
     )
 
+    # Phase 4: Outcome Labels & Calibration
+    ENABLE_OUTCOME_LABELING: bool = Field(
+        default=True,
+        description="Enable background evaluation and labeling of alert outcomes against ended auction sales",
+    )
+    OUTCOME_HORIZON_HOURS: float = Field(
+        default=6.0,
+        description="Hours after alert creation before an outcome is finalized and labeled (default: 6.0)",
+    )
+    SNIPE_SURVIVAL_MINUTES: float = Field(
+        default=15.0,
+        description="Window in minutes for a flagged listing to sell to be categorized as SOLD_FAST (default: 15.0)",
+    )
+
     @model_validator(mode="after")
     def validate_webhook_and_defaults(self) -> "Settings":
         """Ensure valid webhook in production mode and fallback in dry run mode."""

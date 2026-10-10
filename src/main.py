@@ -7,7 +7,7 @@ import asyncio
 import logging
 import signal
 import sys
-from typing import Any
+from typing import Any, Optional
 
 # Ensure Windows consoles don't crash on Minecraft symbols (e.g. ✪ \u272a)
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -223,6 +223,14 @@ async def run_monitor(
         except Exception as err:
             logger.warning("Failed to initialize player tracking: %s", err)
 
+    outcome_labeler = None
+    if db is not None and getattr(settings, "ENABLE_OUTCOME_LABELING", True):
+        try:
+            from src.outcome_labeler import OutcomeLabeler
+            outcome_labeler = OutcomeLabeler(db, config=settings)
+        except Exception as err:
+            logger.warning("Failed to initialize outcome labeler: %s", err)
+
     # In-memory tracking of alerted auction UUIDs to prevent duplicate alerts
     alerted_uuids: set[str] = set()
     telemetry = PipelineTelemetry()
@@ -296,6 +304,19 @@ async def run_monitor(
                     settings.POLL_INTERVAL_SECONDS,
                 )
             else:
+                # Phase 4: Persist live listings start timestamps for time-to-sell joins
+                if db is not None:
+                    live_pairs = [
+                        (str(a.get("uuid", "")), int(a.get("start", 0)))
+                        for a in bin_auctions
+                        if a.get("uuid") and a.get("start")
+                    ]
+                    if live_pairs:
+                        try:
+                            db.record_live_listings(live_pairs)
+                        except Exception as err:
+                            logger.debug("Failed to record live listings: %s", err)
+
                 logger.info("Decoding %d BIN listings in background thread pool...", len(bin_auctions))
                 # 2. Decode NBT offloaded to background thread pool
                 with StageTimer("decode", telemetry):
@@ -329,6 +350,15 @@ async def run_monitor(
                     except Exception as err:
                         logger.debug("Failed to run survival audit cycle: %s", err)
 
+                # Phase 4: Background outcome labeling for matured alerts (> 6h)
+                if outcome_labeler is not None and getattr(settings, "ENABLE_OUTCOME_LABELING", True):
+                    try:
+                        labeled_n = outcome_labeler.evaluate_pending_outcomes()
+                        if labeled_n > 0:
+                            logger.info("Labeled %d completed alert outcomes.", labeled_n)
+                    except Exception as err:
+                        logger.debug("Failed to evaluate alert outcomes: %s", err)
+
                 logger.info(
                     "Evaluation complete. Found %d profitable flip(s).",
                     len(flips_found),
@@ -355,6 +385,7 @@ async def run_monitor(
                                     derpy_active=1 if flip.derpy_active else 0,
                                     fee_model_version=flip.fee_model_version,
                                     trace_json=getattr(flip, "trace_json", None),
+                                    listing_start=getattr(flip, "listing_start", None),
                                 )
                             except Exception as err:
                                 logger.warning("Failed to log alert to DB: %s", err)
