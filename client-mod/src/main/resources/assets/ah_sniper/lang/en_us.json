@@ -1,0 +1,9 @@
+{
+  "key.categories.ah_sniper": "SkyBlock AH Sniper",
+  "key.ah_sniper.open": "Open Snipes Viewer",
+  "gui.ah_sniper.title": "Active Auction House Snipes",
+  "gui.ah_sniper.no_flips": "No active snipes detected. Waiting for local WebSocket stream (ws://127.0.0.1:8765)...",
+  "gui.ah_sniper.inspect": "Inspect",
+  "gui.ah_sniper.status_connected": "Connected to Local Engine (ws://127.0.0.1:8765)",
+  "gui.ah_sniper.status_disconnected": "Disconnected from Local Engine (Reconnecting...)"
+}

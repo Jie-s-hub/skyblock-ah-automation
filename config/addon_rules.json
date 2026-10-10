@@ -1,0 +1,65 @@
+{
+  "hot_potato_book": {
+    "product_id": "HOT_POTATO_BOOK",
+    "max_count": 10
+  },
+  "fuming_potato_book": {
+    "product_id": "FUMING_POTATO_BOOK",
+    "max_count": 5
+  },
+  "wither_scrolls": {
+    "WITHER_SHIELD_SCROLL": {
+      "name": "Wither Shield",
+      "product_id": "WITHER_SHIELD_SCROLL"
+    },
+    "IMPLOSION_SCROLL": {
+      "name": "Implosion",
+      "product_id": "IMPLOSION_SCROLL"
+    },
+    "SHADOW_WARP_SCROLL": {
+      "name": "Shadow Warp",
+      "product_id": "SHADOW_WARP_SCROLL"
+    }
+  },
+  "enrichments": {
+    "prefix": "TALISMAN_ENRICHMENT_",
+    "valid_types": [
+      "CRITICAL_CHANCE",
+      "CRITICAL_DAMAGE",
+      "DAMAGE",
+      "DEFENSE",
+      "FEROCITY",
+      "HEALTH",
+      "INTELLIGENCE",
+      "MAGIC_FIND",
+      "SEA_CREATURE_CHANCE",
+      "SPEED",
+      "STRENGTH",
+      "ATTACK_SPEED"
+    ]
+  },
+  "drill_parts": [
+    "drill_part_engine",
+    "drill_part_fuel_tank",
+    "drill_part_upgrade_module"
+  ],
+  "pet_candy_penalty": {
+    "penalty_per_candy": 0.015,
+    "max_candy": 10
+  },
+  "vanity_rules": {
+    "min_comps_sales": 3,
+    "allowed_prefixes": [
+      "PET_SKIN_"
+    ],
+    "allowed_substrings": [
+      "RUNE"
+    ],
+    "permanent_blacklist": [
+      "DYE_",
+      "PORTAL",
+      "FURNITURE",
+      "MUSIC_DISC"
+    ]
+  }
+}

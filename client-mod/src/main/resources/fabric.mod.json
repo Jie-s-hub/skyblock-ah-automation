@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "ah_sniper",
+  "version": "${version}",
+  "name": "AH Sniper Client",
+  "description": "Real-time in-game visual auction house snipe alert viewer and inspector for Hypixel SkyBlock.",
+  "authors": [
+    "SkyBlock Automation Team"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.skyblock.sniper.client.AhSniperClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.0",
+    "minecraft": "~26.1.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
