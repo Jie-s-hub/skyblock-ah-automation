@@ -190,6 +190,12 @@ async def run_monitor(
         retention_fitter=retention_fitter,
         db=db,
     )
+    from src.election import MayorElectionTracker
+    election_tracker = MayorElectionTracker(
+        session=getattr(client, "_session", None),
+        override=getattr(settings, "MAYOR_OVERRIDE", None),
+        cache_ttl_seconds=getattr(settings, "ELECTION_CACHE_TTL_SECONDS", 600),
+    )
     survival_auditor = None
     if db is not None:
         try:
@@ -226,7 +232,15 @@ async def run_monitor(
             cycle_start = asyncio.get_running_loop().time()
             logger.info("Starting auction polling cycle...")
 
-            # 0. Fetch / refresh Bazaar market cache if networth valuation enabled
+            # 0. Check active mayor (Derpy detection)
+            try:
+                session = await client.get_session()
+                derpy_active = await election_tracker.update(session)
+                evaluator.set_derpy_active(derpy_active)
+            except Exception as err:
+                logger.warning("Failed to update active mayor status: %s", err)
+
+            # 0b. Fetch / refresh Bazaar market cache if networth valuation enabled
             if settings.ENABLE_NETWORTH_VALUATION:
                 try:
                     await bazaar_cache.fetch_bazaar_data()
@@ -322,6 +336,8 @@ async def run_monitor(
                                     margin_pct=flip.margin_pct,
                                     confidence_label=flip.confidence_label,
                                     valuation_path=flip.valuation_path,
+                                    derpy_active=1 if flip.derpy_active else 0,
+                                    fee_model_version=flip.fee_model_version,
                                 )
                             except Exception as err:
                                 logger.warning("Failed to log alert to DB: %s", err)

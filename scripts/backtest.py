@@ -12,7 +12,10 @@ from typing import Any, Optional
 # Ensure project root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.constants.taxes import calculate_progressive_net_profit
+from src.constants.taxes import (
+    calculate_progressive_net_profit,
+    net_revenue,
+)
 from src.db import DatabaseManager, get_db
 from src.evaluator import FlipEvaluator
 
@@ -80,6 +83,7 @@ class BacktestEngine:
         sample_size: int = 100,
         target_window_hours: float = 72.0,
         initial_capital: int = 100_000_000,
+        derpy_override: Optional[bool] = None,
     ) -> BacktestResults:
         """
         Execute historical replay backtest:
@@ -151,8 +155,9 @@ class BacktestEngine:
 
             # Simulated capital execution
             if current_capital >= buy_price:
-                # Realize trade with progressive tax
-                net_pnl = calculate_progressive_net_profit(realized_price, buy_price)
+                # Realize trade with stored or overridden Derpy status
+                is_derpy = derpy_override if derpy_override is not None else bool(alert.get("derpy_active", 0))
+                net_pnl = net_revenue(realized_price, derpy_active=is_derpy) - buy_price
                 current_capital += net_pnl
                 total_profit += net_pnl
 
@@ -206,6 +211,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=100_000_000,
         help="Initial capital in coins (default: 100,000,000)",
     )
+    parser.add_argument(
+        "--derpy",
+        dest="derpy",
+        action="store_true",
+        default=None,
+        help="Force simulate with Mayor Derpy collection fee active",
+    )
+    parser.add_argument(
+        "--no-derpy",
+        dest="derpy",
+        action="store_false",
+        help="Force simulate without Mayor Derpy active",
+    )
     return parser
 
 
@@ -221,6 +239,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             sample_size=args.sample_size,
             target_window_hours=args.window_hours,
             initial_capital=args.capital,
+            derpy_override=args.derpy,
         )
         print(results.summary())
         return 0

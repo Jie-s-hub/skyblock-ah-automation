@@ -218,7 +218,10 @@ def test_missing_clean_baseline_endgame_fallback(base_settings: Settings):
     assert flip.buy_price == 1_200_000_000
     assert flip.retention_rate == 0.85
     assert flip.target_resell_price == 1_421_250_000
-    assert flip.net_profit == 192_825_000
+    # Recomputed by hand per Phase 1 fee model (1,421,250,000 in >=100M tier: 2.5% creation + 1% collection = 3.5%):
+    # Total fee = 1,421,250,000 * 0.035 = 49,743,750 -> Net revenue = 1,371,506,250
+    # Net profit: 1,371,506,250 - 1,200,000,000 = 171,506,250 coins
+    assert flip.net_profit == 171_506_250
 
 
 def test_missing_clean_baseline_empty_cache_returns_none(base_settings: Settings):

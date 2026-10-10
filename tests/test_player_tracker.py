@@ -108,9 +108,12 @@ def test_sale_attribution_and_matching_item_uuid(tracker_fixture: tuple[Database
     )
 
     # 2. ongvvkk sells this exact item at t=46,000 for 1,150,000,000 coins (1.15B)
-    # Tax on 1.15B: 2% of 1.15B (23M) + 1% of 1.05B (10.5M) = 33,500,000 (33.5M)
-    # Net revenue: 1,150,000,000 - 33,500,000 = 1,116,500,000
-    # Net profit: 1,116,500,000 - 900,000,000 = 216,500,000
+    # Recomputed by hand per Phase 1 fee model (>=100M: 2.5% creation fee + 1.0% collection fee):
+    # Creation fee: 1,150,000,000 * 0.025 = 28,750,000
+    # Collection fee: 1,150,000,000 * 0.010 = 11,500,000
+    # Total tax: 28,750,000 + 11,500,000 = 40,250,000
+    # Net revenue: 1,150,000,000 - 40,250,000 = 1,109,750,000
+    # Net profit: 1,109,750,000 - 900,000,000 = 209,750,000
     ended_auctions = [
         {
             "auction_id": "sell-auction-1",
@@ -133,16 +136,16 @@ def test_sale_attribution_and_matching_item_uuid(tracker_fixture: tuple[Database
     assert trade.internal_id == "HYPERION"
     assert trade.buy_price == 900_000_000
     assert trade.sale_price == 1_150_000_000
-    assert trade.progressive_tax == 33_500_000
-    assert trade.net_realized_pnl == 216_500_000
-    assert trade.roi_pct == round((216_500_000 / 900_000_000) * 100.0, 2)
+    assert trade.progressive_tax == 40_250_000
+    assert trade.net_realized_pnl == 209_750_000
+    assert trade.roi_pct == round((209_750_000 / 900_000_000) * 100.0, 2)
     assert trade.hold_duration_seconds == 36.0  # (46000 - 10000) / 1000
 
     # Verify status in database updated to SOLD
     saved = db.get_purchase("pos-1")
     assert saved["status"] == "SOLD"
     assert saved["realized_sell_price"] == 1_150_000_000
-    assert saved["net_realized_pnl"] == 216_500_000
+    assert saved["net_realized_pnl"] == 209_750_000
 
 
 def test_sale_attribution_fifo_fallback(tracker_fixture: tuple[DatabaseManager, PlayerTradeTracker, str]):
@@ -168,8 +171,9 @@ def test_sale_attribution_fifo_fallback(tracker_fixture: tuple[DatabaseManager, 
     )
 
     # ongvvkk sells one JUJU_SHORTBOW for 30M
-    # Tax on 30M: 2% = 600k -> net revenue 29.4M
-    # Oldest purchase is 'juju-old' (buy 20M) -> net PnL = 9.4M
+    # Recomputed by hand per Phase 1 fee model (10M-100M: 2% creation + 1% collection = 3%):
+    # Tax on 30M: 30,000,000 * 0.03 = 900,000 -> net revenue 29,100,000
+    # Oldest purchase is 'juju-old' (buy 20M) -> net PnL = 29,100,000 - 20,000,000 = 9,100,000
     ended = [
         {
             "auction_id": "sell-juju",
@@ -188,7 +192,7 @@ def test_sale_attribution_fifo_fallback(tracker_fixture: tuple[DatabaseManager, 
     assert len(completed) == 1
     assert completed[0].auction_uuid == "juju-old"
     assert completed[0].buy_price == 20_000_000
-    assert completed[0].net_realized_pnl == 9_400_000
+    assert completed[0].net_realized_pnl == 9_100_000
 
     # Verify 'juju-old' is SOLD and 'juju-new' is still HELD
     assert db.get_purchase("juju-old")["status"] == "SOLD"

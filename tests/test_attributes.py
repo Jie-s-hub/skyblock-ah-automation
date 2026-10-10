@@ -178,15 +178,16 @@ def test_evaluator_god_roll_alert_detected():
     }
 
     # Estimated worth is 160,000,000 coins
-    # Net revenue after 2% tax: 160,000,000 * 0.98 = 156,800,000
-    # Net profit: 156,800,000 - 35,000,000 = 121,800,000 coins (margin ~ 348%)
+    # Recomputed by hand per Phase 1 fee model (160M in >=100M tier: 2.5% creation + 1% collection = 3.5%):
+    # Total fee = 160,000,000 * 0.035 = 5,600,000 -> Net revenue = 154,400,000
+    # Net profit: 154,400,000 - 35,000,000 = 119,400,000 coins
     flip = evaluator.evaluate_listing(auction, decoded)
     assert flip is not None
     assert flip.is_attribute_snipe is True
     assert flip.is_god_roll is True
     assert flip.god_roll_type == "MAGE"
     assert flip.target_resell_price == 160_000_000
-    assert flip.net_profit == 121_800_000
+    assert flip.net_profit == 119_400_000
     assert flip.is_priority is True
 
 

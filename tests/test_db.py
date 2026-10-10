@@ -123,8 +123,9 @@ def test_purchases_ledger_lifecycle(temp_db: DatabaseManager):
 
     p_sold = temp_db.get_purchase("buy-uuid-1")
     assert p_sold["status"] == "SOLD"
-    assert p_sold["realized_sell_price"] == 45_000_000
-    assert p_sold["net_realized_pnl"] == 14_100_000  # 45M * 0.98 - 30M
+    # Recomputed by hand per Phase 1 fee model (45M in 10M-100M tier: 2% creation + 1% collection = 3%):
+    # Net revenue = 45,000,000 * 0.97 = 43,650,000. Net PnL = 43,650,000 - 30,000,000 = 13,650,000.
+    assert p_sold["net_realized_pnl"] == 13_650_000
     assert p_sold["notes"] == "Flipped within 4 seconds"
 
     # Query by status

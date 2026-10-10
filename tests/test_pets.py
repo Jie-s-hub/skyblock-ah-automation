@@ -191,8 +191,9 @@ def test_evaluator_pet_snipe_with_level_and_held_item():
     }
 
     # Estimated worth: 300M + 80M (Lvl 100) + 50M (Tier Boost) = 430,000,000
-    # Net revenue after 2% tax: 430,000,000 * 0.98 = 421,400,000
-    # Net profit: 421,400,000 - 350,000,000 = 71,400,000 coins (margin ~ 20.4%)
+    # Recomputed by hand per Phase 1 fee model (430M in >=100M tier: 2.5% creation + 1.0% collection = 3.5%):
+    # Total fee = 430,000,000 * 0.035 = 15,050,000 -> Net revenue = 414,950,000
+    # Net profit: 414,950,000 - 350,000,000 = 64,950,000 coins
     flip = evaluator.evaluate_listing(auction, decoded)
     assert flip is not None
     assert flip.is_pet is True
@@ -201,8 +202,8 @@ def test_evaluator_pet_snipe_with_level_and_held_item():
     assert flip.pet_type == "ENDER_DRAGON"
     assert flip.held_item_value == 50_000_000
     assert flip.target_resell_price == 430_000_000
-    assert flip.net_profit == 71_400_000
-    assert flip.margin_pct == pytest.approx(20.4, abs=0.1)
+    assert flip.net_profit == 64_950_000
+    assert flip.margin_pct == pytest.approx(18.56, abs=0.1)
 
 
 def test_evaluator_clean_lvl_1_pet_no_held_item_falls_through_to_clean():
@@ -241,9 +242,9 @@ def test_evaluator_clean_lvl_1_pet_no_held_item_falls_through_to_clean():
     flip = evaluator.evaluate_listing(auction, decoded)
     assert flip is not None
     assert flip.is_networth_snipe is False
-    assert flip.target_resell_price == 30_000_000
-    # Net profit: (30M * 0.98) - 20M = 29.4M - 20M = 9.4M
-    assert flip.net_profit == 9_400_000
+    # Recomputed by hand per Phase 1 fee model (30M in 10M-100M tier: 2% creation + 1% collection = 3%):
+    # Total fee = 30,000,000 * 0.03 = 900,000 -> net profit: 29.1M - 20M = 9.1M
+    assert flip.net_profit == 9_100_000
 
 
 def test_pet_discord_embed_formatting():

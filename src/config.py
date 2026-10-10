@@ -438,9 +438,31 @@ class Settings(BaseSettings):
         description="Apply 5% haircut when a valuation lane's 24h conversion rate falls below 40%",
     )
 
+    # Mayor & Election Configuration (Phase 1)
+    DERPY_COLLECTION_FEE_RATE: float = Field(
+        default=0.04,
+        description="Collection fee rate applied when Mayor Derpy is active (default: 0.04 / 4%)",
+    )
+    MAYOR_OVERRIDE: Optional[str] = Field(
+        default=None,
+        description="Manual override for active SkyBlock mayor (e.g. 'derpy' or 'paul')",
+    )
+    ELECTION_CACHE_TTL_SECONDS: int = Field(
+        default=600,
+        description="TTL in seconds for caching Hypixel mayor election API response (default: 600s / 10m)",
+    )
+
     @model_validator(mode="after")
     def validate_webhook_and_defaults(self) -> "Settings":
         """Ensure valid webhook in production mode and fallback in dry run mode."""
+        import logging
+        cfg_logger = logging.getLogger(__name__)
+        if self.AH_TAX_RATE != 0.02 or self.USE_PROGRESSIVE_TAX:
+            cfg_logger.warning(
+                "AH_TAX_RATE and USE_PROGRESSIVE_TAX are deprecated and ignored; "
+                "src/constants/taxes.py is now the single source of truth for all fee calculations."
+            )
+
         if not self.DISCORD_WEBHOOK_URL:
             if self.DRY_RUN:
                 self.DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/dummy"

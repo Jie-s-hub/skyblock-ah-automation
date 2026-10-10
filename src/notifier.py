@@ -82,6 +82,13 @@ def _append_confidence_and_efficiency_fields(fields: list[dict[str, Any]], flip:
             })
 
 
+def format_resell_price_str(flip: FlipResult, suffix: str = "") -> str:
+    val = f"{flip.target_resell_price:,}{suffix}"
+    if getattr(flip, "suggested_list_price", None) and flip.suggested_list_price != flip.target_resell_price:
+        val += f"\n💡 Suggested List: **{flip.suggested_list_price:,}** coins"
+    return val
+
+
 class DiscordNotifier:
     """Dispatches formatted arbitrage alerts to a Discord channel via webhook and local WebSocket."""
 
@@ -151,7 +158,7 @@ class DiscordNotifier:
             },
             {
                 "name": "Target Resell",
-                "value": f"{flip.target_resell_price:,} coins",
+                "value": format_resell_price_str(flip, " coins"),
                 "inline": True,
             },
             {
@@ -256,7 +263,7 @@ class DiscordNotifier:
             },
             {
                 "name": "Estimated Resell Value",
-                "value": f"{flip.target_resell_price:,} coins",
+                "value": format_resell_price_str(flip, " coins"),
                 "inline": True,
             },
             {
@@ -325,7 +332,7 @@ class DiscordNotifier:
             },
             {
                 "name": "Estimated Market Value",
-                "value": f"{flip.target_resell_price:,} ({resell_m:.2f}M)",
+                "value": format_resell_price_str(flip, f" ({resell_m:.2f}M)"),
                 "inline": True,
             },
             {
@@ -422,7 +429,7 @@ class DiscordNotifier:
         fields.extend([
             {
                 "name": "Estimated Worth",
-                "value": f"{flip.target_resell_price:,} ({resell_m:.2f}M)",
+                "value": format_resell_price_str(flip, f" ({resell_m:.2f}M)"),
                 "inline": True,
             },
             {

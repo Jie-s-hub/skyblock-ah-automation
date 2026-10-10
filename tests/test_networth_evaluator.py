@@ -176,10 +176,11 @@ def test_path_b_upgraded_item_networth_engine(base_settings: Settings, mock_baza
     # Resell baseline: 60,000,000 + int(46,000,000 * 0.70) = 60,000,000 + 32,200,000 = 92,200,000
     assert flip.target_resell_price == 92_200_000
 
-    # Net revenue after 2% tax: 92,200,000 * 0.98 = 90,356,000
-    # Net profit: 90,356,000 - 65,000,000 = 25,356,000
-    assert flip.net_profit == 25_356_000
-    assert flip.margin_pct == pytest.approx(39.01, abs=0.1)
+    # Recomputed by hand per Phase 1 fee model (92.2M in 10M-100M tier: 2% creation + 1% collection = 3%):
+    # Total fee = 92,200,000 * 0.03 = 2,766,000 -> Net revenue = 89,434,000
+    # Net profit: 89,434,000 - 65,000,000 = 24,434,000
+    assert flip.net_profit == 24_434_000
+    assert flip.margin_pct == pytest.approx(37.59, abs=0.1)
 
     # Verify addon breakdown items
     breakdown_types = [a["type"] for a in flip.addon_breakdown]

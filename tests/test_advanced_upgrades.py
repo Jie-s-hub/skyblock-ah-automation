@@ -272,7 +272,7 @@ def test_endgame_staple_valuation_85_percent_retention():
 
     auction = {
         "uuid": "term-auction-uuid",
-        "starting_bid": 780_000_000,
+        "starting_bid": 770_000_000,
         "item_name": "Precise Terminator ✪✪✪✪✪✪✪✪",
     }
     decoded = {
@@ -297,10 +297,9 @@ def test_endgame_staple_valuation_85_percent_retention():
     # - Gemstones (2x Perfect Jasper): 2 * 18M = 36M
     # - Enchants (Overload 5): 8M
     # Total addons: 10M + 42M + 36M + 8M = 96,000,000
-    # Dynamic Retention: Base LBIN = 750M >= 500M -> 85% (0.85)
-    # Resell baseline: 750,000,000 + round(96,000,000 * 0.85) = 750,000,000 + 81,600,000 = 831,600,000
-    # Net revenue (2% tax): 831,600,000 * 0.98 = 814,968,000
-    # Net profit: 814,968,000 - 780,000,000 = 34,968,000 coins
+    # Recomputed by hand per Phase 1 fee model (831.6M in >=100M tier: 2.5% creation + 1.0% collection = 3.5%):
+    # Total fee = 831,600,000 * 0.035 = 29,106,000 -> Net revenue = 802,494,000
+    # Buy price: 770,000,000 -> Net profit: 802,494,000 - 770,000,000 = 32,494,000 coins (margin 4.22% >= 4.0% staple threshold)
 
     flip = evaluator.evaluate_listing(auction, decoded)
     assert flip is not None
@@ -311,7 +310,7 @@ def test_endgame_staple_valuation_85_percent_retention():
     assert flip.total_addon_cost == 96_000_000
     assert flip.intrinsic_worth == 750_000_000 + 96_000_000
     assert flip.target_resell_price == 831_600_000
-    assert flip.net_profit == 34_968_000
+    assert flip.net_profit == 32_494_000
 
     # Test Discord Embed contains Retention Rate Applied: 85%
     notifier = DiscordNotifier(settings)
@@ -368,15 +367,16 @@ def test_budget_gear_valuation_50_percent_retention():
     # Total addons: 10M (recomb) + 4M (ruby) = 14,000,000
     # Dynamic Retention: 50% (0.50)
     # Resell baseline: 15,000,000 + round(14,000,000 * 0.50) = 15,000,000 + 7,000,000 = 22,000,000
-    # Net revenue: 22,000,000 * 0.98 = 21,560,000
-    # Net profit: 21,560,000 - 16,000,000 = 5,560,000 coins
+    # Recomputed by hand per Phase 1 fee model (22M in 10M-100M tier: 2% creation + 1% collection = 3%):
+    # Total fee = 22,000,000 * 0.03 = 660,000 -> Net revenue: 21,340,000
+    # Net profit: 21,340,000 - 16,000,000 = 5,340,000 coins
 
     flip = evaluator.evaluate_listing(auction, decoded)
     assert flip is not None
     assert flip.is_networth_snipe is True
     assert flip.retention_rate == 0.50
     assert flip.target_resell_price == 22_000_000
-    assert flip.net_profit == 5_560_000
+    assert flip.net_profit == 5_340_000
 
     # Discord Embed verification
     notifier = DiscordNotifier(settings)

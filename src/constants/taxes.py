@@ -1,11 +1,169 @@
-"""Hypixel SkyBlock Progressive Auction House Tax Calculations."""
+"""Hypixel SkyBlock Auction House Tax & Fee Calculations.
+
+Single source of truth for creation fees, collection taxes, net revenues, and tax cliff optimization.
+"""
 
 from __future__ import annotations
 
-
 import math
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
+# VERIFY against the wiki (Auction House and Derpy pages)
+# Hypixel Auction House Fee Schedule Table:
+# -----------------------------------------------------------------------------------------
+# Price Tier                   | Creation Fee Rate | Collection Fee (Normal) | Derpy Mayor
+# -----------------------------------------------------------------------------------------
+# 0 to 999,999                 | 1.0%              | 0.0%                    | 0.0%
+# 1,000,000 to 9,999,999       | 1.0%              | 1.0%                    | 4.0%
+# 10,000,000 to 99,999,999     | 2.0%              | 1.0%                    | 4.0%
+# >= 100,000,000               | 2.5%              | 1.0%                    | 4.0%
+# -----------------------------------------------------------------------------------------
+# Note: All fees are floored to whole coins. Creation fee applies to the entire price.
+FEE_SCHEDULE = [
+    {
+        "tier_name": "SUB_1M",
+        "min_price": 0,
+        "max_price": 999_999,
+        "creation_rate": 0.01,
+        "collection_rate": 0.0,
+        "derpy_collection_rate": 0.0,
+    },
+    {
+        "tier_name": "1M_TO_10M",
+        "min_price": 1_000_000,
+        "max_price": 9_999_999,
+        "creation_rate": 0.01,
+        "collection_rate": 0.01,
+        "derpy_collection_rate": 0.04,
+    },
+    {
+        "tier_name": "10M_TO_100M",
+        "min_price": 10_000_000,
+        "max_price": 99_999_999,
+        "creation_rate": 0.02,
+        "collection_rate": 0.01,
+        "derpy_collection_rate": 0.04,
+    },
+    {
+        "tier_name": "OVER_100M",
+        "min_price": 100_000_000,
+        "max_price": float("inf"),
+        "creation_rate": 0.025,
+        "collection_rate": 0.01,
+        "derpy_collection_rate": 0.04,
+    },
+]
+
+
+def creation_fee(price: int) -> int:
+    """
+    Calculate Hypixel AH listing creation fee floored to whole coins.
+
+    Tier cliffs (flat % applied to the entire price):
+    - price < 10,000,000: 1.0%
+    - 10,000,000 <= price < 100,000,000: 2.0%
+    - price >= 100,000,000: 2.5%
+    """
+    if price <= 0:
+        return 0
+    if price < 10_000_000:
+        return math.floor(price * 0.01)
+    elif price < 100_000_000:
+        return math.floor(price * 0.02)
+    else:
+        return math.floor(price * 0.025)
+
+
+def collection_fee(
+    price: int,
+    *,
+    derpy_active: bool = False,
+    derpy_rate: float = 0.04,
+) -> int:
+    """
+    Calculate Hypixel AH collection fee floored to whole coins.
+    - price < 1,000,000: 0
+    - price >= 1,000,000: 1.0% normal, or derpy_rate (default 4.0%) when Derpy is mayor.
+    """
+    if price < 1_000_000:
+        return 0
+    rate = derpy_rate if derpy_active else 0.01
+    return math.floor(price * rate)
+
+
+def total_fee(
+    price: int,
+    *,
+    derpy_active: bool = False,
+    derpy_rate: float = 0.04,
+) -> int:
+    """Total fees deducted (creation_fee + collection_fee)."""
+    if price <= 0:
+        return 0
+    return creation_fee(price) + collection_fee(price, derpy_active=derpy_active, derpy_rate=derpy_rate)
+
+
+def net_revenue(
+    price: int,
+    *,
+    derpy_active: bool = False,
+    derpy_rate: float = 0.04,
+) -> int:
+    """
+    Calculate net revenue after deducting creation and collection fees.
+    net_revenue(price, *, derpy_active) =
+        price - creation_fee(price) - collection_fee(price, derpy_active)
+    """
+    if price <= 0:
+        return 0
+    return price - creation_fee(price) - collection_fee(price, derpy_active=derpy_active, derpy_rate=derpy_rate)
+
+
+class BestResaleResult(NamedTuple):
+    """Result container for tax cliff optimized resale."""
+    net_revenue: int
+    list_price: int
+
+    @property
+    def net(self) -> int:
+        return self.net_revenue
+
+    @property
+    def price(self) -> int:
+        return self.list_price
+
+
+def best_resale_net(
+    target: int,
+    *,
+    derpy_active: bool = False,
+    derpy_rate: float = 0.04,
+) -> BestResaleResult:
+    """
+    Compare listing at target vs at (boundary - 1) for each boundary at or below target (1M, 10M, 100M).
+    Returns the higher net and the list price.
+    """
+    if target <= 0:
+        return BestResaleResult(0, 0)
+
+    best_price = target
+    best_net = net_revenue(target, derpy_active=derpy_active, derpy_rate=derpy_rate)
+
+    boundaries = (1_000_000, 10_000_000, 100_000_000)
+    for b in boundaries:
+        if target >= b:
+            candidate_price = b - 1
+            candidate_net = net_revenue(candidate_price, derpy_active=derpy_active, derpy_rate=derpy_rate)
+            if candidate_net > best_net:
+                best_net = candidate_net
+                best_price = candidate_price
+
+    return BestResaleResult(best_net, best_price)
+
+
+# ---------------------------------------------------------------------------
+# Compatibility & Legacy Wrappers
+# ---------------------------------------------------------------------------
 
 class AHFeeBreakdown(TypedDict):
     listing_fee: int
@@ -20,9 +178,7 @@ def calculate_ah_fees(
     collection_tax_enabled: bool = True,
     collection_tax_min_price: int = 1_000_000,
 ) -> AHFeeBreakdown:
-    """
-    Computes exact Hypixel AH listing fee, collection tax, total deductions, and net revenue.
-    """
+    """Legacy helper returning full fee breakdown dictionary."""
     if price <= 0:
         return {
             "listing_fee": 0,
@@ -31,112 +187,32 @@ def calculate_ah_fees(
             "net_revenue": 0,
         }
 
-    # 1. Listing fee bracket
-    if price < 10_000_000:
-        listing_rate = 0.01
-    elif price <= 100_000_000:
-        listing_rate = 0.02
-    else:
-        listing_rate = 0.025
-    listing_fee = math.floor(price * listing_rate)
-
-    # 2. Collection tax bracket with 1M protected floor
-    claim_rate = 0.04 if derpy else 0.01
-    if collection_tax_enabled and price > collection_tax_min_price:
-        raw_tax = math.floor(price * claim_rate)
-        collection_tax = min(raw_tax, price - collection_tax_min_price)
-    else:
-        collection_tax = 0
-
-    total_deductions = listing_fee + collection_tax
-    net_revenue = price - total_deductions
-
+    c_fee = creation_fee(price)
+    col_fee = collection_fee(price, derpy_active=derpy) if collection_tax_enabled else 0
+    tot = c_fee + col_fee
     return {
-        "listing_fee": listing_fee,
-        "collection_tax": collection_tax,
-        "total_deductions": total_deductions,
-        "net_revenue": net_revenue,
+        "listing_fee": c_fee,
+        "collection_tax": col_fee,
+        "total_deductions": tot,
+        "net_revenue": price - tot,
     }
 
 
 def optimize_target_resell(suggested_price: int, derpy: bool = False) -> int:
-    """
-    Clamps target resale prices out of dead zones around 10M and 100M tax cliffs
-    if listing just below the cliff boundary yields strictly greater net revenue.
-    """
-    if suggested_price <= 0:
-        return 0
-
-    current_net = calculate_ah_fees(suggested_price, derpy)["net_revenue"]
-
-    # 10M Boundary Check (Dead zone: ~10.0M to ~10.15M)
-    if 10_000_000 <= suggested_price < 10_150_000:
-        cliff_net = calculate_ah_fees(9_999_999, derpy)["net_revenue"]
-        if cliff_net >= current_net:
-            return 9_999_999
-
-    # 100M Boundary Check (Dead zone: ~100.0M to ~100.60M)
-    if 100_000_000 < suggested_price < 100_600_000:
-        cliff_net = calculate_ah_fees(99_999_999, derpy)["net_revenue"]
-        if cliff_net >= current_net:
-            return 99_999_999
-
-    return suggested_price
+    """Clamps target resale prices out of dead zones using best_resale_net."""
+    return best_resale_net(suggested_price, derpy_active=derpy).list_price
 
 
 def calculate_progressive_ah_tax(resell_price: int) -> int:
-    """
-    Calculate the progressive Auction House tax on a completed sale or target resell.
-
-    Hypixel progressive tax schedule:
-    - Resell < 10M: 1% listing fee
-    - Resell 10M - 100M: 2% listing fee
-    - Resell > 100M: 2% on total price + 1% collection fee on amount exceeding 100M
-                     (Effective tax rate: ~2.5% to 3.0%)
-
-    Args:
-        resell_price: Total sale or listing price in coins.
-
-    Returns:
-        int: Total tax deducted in coins (rounded down / truncated to integer).
-    """
-    if resell_price <= 0:
-        return 0
-
-    if resell_price < 10_000_000:
-        return int(resell_price * 0.01)
-    elif resell_price <= 100_000_000:
-        return int(resell_price * 0.02)
-    else:
-        base_tax = resell_price * 0.02
-        excess_tax = (resell_price - 100_000_000) * 0.01
-        return int(base_tax + excess_tax)
+    """Backward compatibility wrapper returning total fees."""
+    return total_fee(resell_price, derpy_active=False)
 
 
 def calculate_progressive_net_revenue(resell_price: int) -> int:
-    """
-    Calculate net revenue received after deducting progressive AH tax.
-
-    Args:
-        resell_price: Total sale or listing price in coins.
-
-    Returns:
-        int: Net revenue in coins.
-    """
-    if resell_price <= 0:
-        return 0
-    return resell_price - calculate_progressive_ah_tax(resell_price)
+    """Backward compatibility wrapper returning net revenue."""
+    return net_revenue(resell_price, derpy_active=False)
 
 
 def calculate_progressive_net_profit(resell_price: int, buy_price: int) -> int:
-    """
-    Calculate net profit earned after progressive AH tax and purchase cost.
-
-    Args:
-        resell_price: Total sale or listing price in coins.
-        buy_price: Original purchase price in coins.
-
-    Returns:
-        int: Net realized or projected profit in coins.
-    """
-    return calculate_progressive_net_revenue(resell_price) - buy_price
+    """Backward compatibility wrapper returning net profit after purchase cost."""
+    return net_revenue(resell_price, derpy_active=False) - buy_price

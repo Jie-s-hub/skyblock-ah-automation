@@ -136,6 +136,11 @@ class FlipResult(BaseModel):
     optimistic_upside: Optional[int] = None
     queue_depth: int = 0
 
+    # Phase 1 Fee Model and Dead Zone Cliff Optimization
+    suggested_list_price: Optional[int] = None
+    derpy_active: bool = False
+    fee_model_version: int = 2
+
 
 
 PROGRESSION_STAPLES: dict[str, str] = {
@@ -229,6 +234,12 @@ class FlipEvaluator:
         self._pet_buckets: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
         self.last_pet_rejections: dict[str, str] = {}
         self._pet_dedupe_cache: dict[tuple, float] = {}
+        self.derpy_active: bool = bool(getattr(config, "MAYOR_DERPY_ACTIVE", False))
+        self.derpy_collection_fee_rate: float = float(getattr(config, "DERPY_COLLECTION_FEE_RATE", 0.04))
+
+    def set_derpy_active(self, active: bool) -> None:
+        """Set whether Mayor Derpy is currently active."""
+        self.derpy_active = active
 
     def set_db(self, db: Any) -> None:
         """Set or update the persistence database manager."""
@@ -420,14 +431,15 @@ class FlipEvaluator:
 
     def calculate_net_revenue(self, resell_price: int) -> int:
         """
-        Calculate net revenue from target resell price accounting for AH tax.
-        If USE_PROGRESSIVE_TAX is enabled, applies progressive brackets (<10M: 1%, 10-100M: 2%, >100M: 2%+1% excess).
-        Otherwise falls back to flat AH_TAX_RATE.
+        Calculate net revenue from target resell price accounting for creation and collection fees.
+        src/constants/taxes.py is the single source of truth.
         """
-        if getattr(self.config, "USE_PROGRESSIVE_TAX", False):
-            from src.constants.taxes import calculate_progressive_net_revenue
-            return calculate_progressive_net_revenue(resell_price)
-        return int(round(resell_price * (1.0 - self.config.AH_TAX_RATE)))
+        from src.constants.taxes import net_revenue
+        return net_revenue(
+            resell_price,
+            derpy_active=self.derpy_active,
+            derpy_rate=self.derpy_collection_fee_rate,
+        )
 
     def is_blacklisted(self, internal_id: str, item_name: str = "") -> bool:
         """
@@ -1881,6 +1893,18 @@ class FlipEvaluator:
         """
         if flip is None:
             return None
+
+        from src.constants.taxes import best_resale_net
+        best_res = best_resale_net(
+            flip.target_resell_price,
+            derpy_active=self.derpy_active,
+            derpy_rate=self.derpy_collection_fee_rate,
+        )
+        if best_res.list_price != flip.target_resell_price:
+            flip.suggested_list_price = best_res.list_price
+        flip.derpy_active = self.derpy_active
+        flip.fee_model_version = 2
+
         if getattr(self.config, "ENABLE_CAPITAL_EFFICIENCY", True):
             from src.ranking import score_and_rank_flip
 

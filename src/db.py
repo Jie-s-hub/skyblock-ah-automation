@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS alerts (
     survival_seconds INTEGER DEFAULT 0,
     survival_duration_seconds REAL DEFAULT 0.0,
     last_checked INTEGER DEFAULT 0,
-    last_checked_timestamp INTEGER DEFAULT 0
+    last_checked_timestamp INTEGER DEFAULT 0,
+    derpy_active INTEGER DEFAULT 0,
+    fee_model_version INTEGER DEFAULT 2
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_item_time ON alerts(internal_id, timestamp);
 
@@ -48,7 +50,9 @@ CREATE TABLE IF NOT EXISTS purchases (
     net_realized_pnl INTEGER,
     status TEXT NOT NULL,
     notes TEXT,
-    features_json TEXT
+    features_json TEXT,
+    derpy_active INTEGER DEFAULT 0,
+    fee_model_version INTEGER DEFAULT 2
 );
 CREATE INDEX IF NOT EXISTS idx_purchases_status ON purchases(status);
 CREATE INDEX IF NOT EXISTS idx_purchases_item_uuid ON purchases(item_uuid);
@@ -150,6 +154,22 @@ class DatabaseManager:
                     conn.execute(f"ALTER TABLE alerts ADD COLUMN {col_name} {col_type};")
                 except sqlite3.OperationalError:
                     pass
+
+            # Phase 1 Migration: Add derpy_active and fee_model_version (old rows keep version 1)
+            cur = conn.execute("PRAGMA user_version;")
+            ver_row = cur.fetchone()
+            curr_version = ver_row[0] if ver_row else 0
+            if curr_version < 2:
+                for tbl in ("alerts", "purchases"):
+                    for col_name, col_type in [
+                        ("derpy_active", "INTEGER DEFAULT 0"),
+                        ("fee_model_version", "INTEGER DEFAULT 1"),
+                    ]:
+                        try:
+                            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col_name} {col_type};")
+                        except sqlite3.OperationalError:
+                            pass
+                conn.execute("PRAGMA user_version = 2;")
         logger.debug("Database initialized with WAL mode at: %s", self.db_path)
 
     def close(self) -> None:
@@ -177,6 +197,8 @@ class DatabaseManager:
         *,
         target_resell_price: Optional[int] = None,
         net_profit: Optional[int] = None,
+        derpy_active: int = 0,
+        fee_model_version: int = 2,
     ) -> bool:
         """Insert or ignore an arbitrage alert."""
         conn = self._get_connection()
@@ -197,8 +219,9 @@ class DatabaseManager:
         INSERT OR IGNORE INTO alerts (
             auction_uuid, timestamp, internal_id, buy_price,
             estimated_resell, projected_profit, margin_pct,
-            confidence_label, valuation_path, features_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            confidence_label, valuation_path, features_json,
+            derpy_active, fee_model_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         try:
             with conn:
@@ -215,6 +238,8 @@ class DatabaseManager:
                         confidence_label,
                         valuation_path,
                         feat_str,
+                        int(derpy_active),
+                        int(fee_model_version),
                     ),
                 )
                 return cur.rowcount > 0
@@ -380,6 +405,8 @@ class DatabaseManager:
         notes: Optional[str] = None,
         features_json: Optional[str | dict[str, Any]] = None,
         status: str = "HELD",
+        derpy_active: int = 0,
+        fee_model_version: int = 2,
     ) -> bool:
         """Record or update a purchased item into the portfolio ledger."""
         conn = self._get_connection()
@@ -393,12 +420,15 @@ class DatabaseManager:
         query = """
         INSERT INTO purchases (
             auction_uuid, internal_id, item_uuid, buy_price,
-            buy_timestamp, status, notes, features_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            buy_timestamp, status, notes, features_json,
+            derpy_active, fee_model_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(auction_uuid) DO UPDATE SET
             buy_price = excluded.buy_price,
             status = excluded.status,
-            notes = coalesce(excluded.notes, purchases.notes)
+            notes = coalesce(excluded.notes, purchases.notes),
+            derpy_active = excluded.derpy_active,
+            fee_model_version = excluded.fee_model_version
         """
         try:
             with conn:
@@ -413,6 +443,8 @@ class DatabaseManager:
                         status,
                         notes,
                         feat_str,
+                        int(derpy_active),
+                        int(fee_model_version),
                     ),
                 )
                 return True
@@ -431,18 +463,23 @@ class DatabaseManager:
         net_realized_pnl: Optional[int] = None,
         status: str = "SOLD",
         notes: Optional[str] = None,
+        derpy_active: Optional[int] = None,
+        fee_model_version: Optional[int] = None,
     ) -> bool:
         """Mark a purchase as sold, recording realized proceeds and net PnL."""
         conn = self._get_connection()
         ts = realized_sell_timestamp if realized_sell_timestamp is not None else int(time.time() * 1000)
 
-        # If net_realized_pnl is omitted, look up original buy_price and compute with progressive tax
+        existing = self.get_purchase(auction_uuid) if (net_realized_pnl is None or derpy_active is None) else None
+        is_derpy = bool(derpy_active if derpy_active is not None else (existing.get("derpy_active", 0) if existing else 0))
+        model_ver = fee_model_version if fee_model_version is not None else (existing.get("fee_model_version", 2) if existing else 2)
+
+        # If net_realized_pnl is omitted, look up original buy_price and compute with net_revenue
         if net_realized_pnl is None:
-            existing = self.get_purchase(auction_uuid)
             if existing:
-                from src.constants.taxes import calculate_progressive_net_profit
+                from src.constants.taxes import net_revenue
                 buy_p = int(existing["buy_price"])
-                net_realized_pnl = calculate_progressive_net_profit(realized_sell_price, buy_p)
+                net_realized_pnl = net_revenue(realized_sell_price, derpy_active=is_derpy) - buy_p
             else:
                 net_realized_pnl = 0
 
@@ -452,7 +489,9 @@ class DatabaseManager:
             realized_sell_timestamp = ?,
             net_realized_pnl = ?,
             status = ?,
-            notes = coalesce(?, notes)
+            notes = coalesce(?, notes),
+            derpy_active = ?,
+            fee_model_version = ?
         WHERE auction_uuid = ?
         """
         try:
@@ -465,6 +504,8 @@ class DatabaseManager:
                         int(net_realized_pnl),
                         status,
                         notes,
+                        int(is_derpy),
+                        int(model_ver),
                         auction_uuid,
                     ),
                 )

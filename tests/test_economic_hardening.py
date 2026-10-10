@@ -59,12 +59,15 @@ def test_calculate_ah_fees_flat_tiers_and_collection_tax():
     assert sub_1m["total_deductions"] == 5_000
     assert sub_1m["net_revenue"] == 495_000
 
-    # 1M Floor Cap: 1,005,000 caps collection tax at 5,000 coins
+    # 1M boundary: per Hypixel AH fee rules, collection fee is flat 1.0% of price for all prices >= 1,000,000.
+    # Recomputed by hand per Phase 1 fee model:
+    # 1,005,000 * 0.01 = 10,050 creation fee; 1,005,000 * 0.01 = 10,050 collection fee.
+    # total deductions = 20,100; net revenue = 1,005,000 - 20,100 = 984,900.
     cap_1m = calculate_ah_fees(1_005_000)
-    assert cap_1m["collection_tax"] == 5_000
+    assert cap_1m["collection_tax"] == 10_050
     assert cap_1m["listing_fee"] == 10_050
-    assert cap_1m["total_deductions"] == 15_050
-    assert cap_1m["net_revenue"] == 989_950
+    assert cap_1m["total_deductions"] == 20_100
+    assert cap_1m["net_revenue"] == 984_900
 
     # 2. Exactly at 9,999,999 (1% tier boundary)
     fees_9m = calculate_ah_fees(9_999_999)

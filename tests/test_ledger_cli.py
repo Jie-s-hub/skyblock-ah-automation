@@ -72,13 +72,15 @@ def test_cli_mark_sold_and_report(cli_db: tuple[DatabaseManager, str], capsys):
         buy_timestamp=1000,
     )
 
-    # Mark sold at 1.2B (tax on 1.2B: 2% of 1.2B (24M) + 1% of 1.1B (11M) = 35M -> net revenue 1,165M -> PnL = +165M)
+    # Mark sold at 1.2B
+    # Recomputed by hand per Phase 1 fee model (>=100M: 2.5% creation fee + 1.0% collection fee = 3.5%):
+    # Tax on 1.2B: 1.2B * 0.035 = 42,000,000 -> net revenue 1,158,000,000 -> PnL = +158,000,000 coins
     exit_code = main(["--db", db_file, "mark-sold", "flip-1", "--price", "1200000000", "--timestamp", "15000"])
     assert exit_code == 0
 
     captured = capsys.readouterr()
     assert "TRADE RECORDED" in captured.out
-    assert "165,000,000 coins" in captured.out
+    assert "158,000,000 coins" in captured.out
 
     # Run report command
     exit_code_rep = main(["--db", db_file, "report"])
@@ -87,5 +89,5 @@ def test_cli_mark_sold_and_report(cli_db: tuple[DatabaseManager, str], capsys):
     rep_captured = capsys.readouterr()
     assert "HYPIXEL AH ARBITRAGE PERFORMANCE LEDGER" in rep_captured.out
     assert "HYPERION" in rep_captured.out
-    assert "+165,000,000" in rep_captured.out
+    assert "+158,000,000" in rep_captured.out
     assert "Win Rate:               100.0%" in rep_captured.out

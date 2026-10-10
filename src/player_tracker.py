@@ -15,6 +15,9 @@ from src.config import Settings
 from src.constants.taxes import (
     calculate_progressive_ah_tax,
     calculate_progressive_net_profit,
+    collection_fee,
+    creation_fee,
+    net_revenue,
 )
 from src.db import DatabaseManager, get_db
 from src.nbt_decoder import decode_item_bytes
@@ -214,8 +217,9 @@ class PlayerTradeTracker:
                 if matched_purchase:
                     buy_price = int(matched_purchase["buy_price"])
                     buy_ts = int(matched_purchase.get("buy_timestamp", timestamp))
-                    tax = calculate_progressive_ah_tax(price)
-                    net_pnl = calculate_progressive_net_profit(price, buy_price)
+                    is_derpy = bool(matched_purchase.get("derpy_active", 0))
+                    tax = creation_fee(price) + collection_fee(price, derpy_active=is_derpy)
+                    net_pnl = net_revenue(price, derpy_active=is_derpy) - buy_price
                     roi_pct = (net_pnl / buy_price) * 100.0 if buy_price > 0 else 0.0
                     hold_sec = max(0.0, (timestamp - buy_ts) / 1000.0)
                     hours = hold_sec / 3600.0
@@ -229,6 +233,8 @@ class PlayerTradeTracker:
                         net_realized_pnl=net_pnl,
                         status="SOLD",
                         notes=f"Auto-paired flip for {self.tracked_ign}",
+                        derpy_active=1 if is_derpy else 0,
+                        fee_model_version=2,
                     )
 
                     trade = CompletedTrade(

@@ -94,15 +94,18 @@ def test_backtest_hit_rate_and_error_metrics(backtest_db: tuple[DatabaseManager,
     assert results.mae == 5_000_000.0
     # RMSE = sqrt((0^2 + 10M^2) / 2) = sqrt(50,000,000,000,000) ≈ 7,071,067.81
     assert pytest.approx(results.rmse, rel=1e-3) == 7_071_067.81
-    # Total profit = 9.4M + 9.0M = 18.4M
-    assert results.total_simulated_profit == 18_400_000
-    assert results.final_capital == 100_000_000 + 18_400_000
-    assert results.capital_growth_pct == 18.4
+    # Recomputed by hand per Phase 1 fee model (10M-100M: 2% creation + 1% collection = 3%):
+    # Sale 1 (30M): fee = 900k -> net revenue = 29.1M -> profit = 29.1M - 20M = 9.1M
+    # Sale 2 (50M): fee = 1.5M -> net revenue = 48.5M -> profit = 48.5M - 40M = 8.5M
+    # Total profit = 9.1M + 8.5M = 17.6M
+    assert results.total_simulated_profit == 17_600_000
+    assert results.final_capital == 100_000_000 + 17_600_000
+    assert results.capital_growth_pct == pytest.approx(17.6)
 
     summary_text = results.summary()
     assert "HISTORICAL REPLAY BACKTEST REPORT" in summary_text
     assert "50.00%" in summary_text
-    assert "+18.40%" in summary_text
+    assert "+17.60%" in summary_text
 
 
 def test_backtest_cli_main(backtest_db: tuple[DatabaseManager, str], capsys):

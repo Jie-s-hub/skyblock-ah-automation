@@ -16,6 +16,9 @@ from src.constants.taxes import (
     calculate_progressive_ah_tax,
     calculate_progressive_net_profit,
     calculate_progressive_net_revenue,
+    collection_fee,
+    creation_fee,
+    net_revenue,
 )
 from src.db import DatabaseManager, get_db
 
@@ -108,8 +111,11 @@ def handle_mark_sold(args: argparse.Namespace, db: DatabaseManager) -> int:
     buy_ts = int(purchase.get("buy_timestamp", sell_ts))
     internal_id = purchase.get("internal_id", "UNKNOWN")
 
-    tax = calculate_progressive_ah_tax(sell_price)
-    net_pnl = calculate_progressive_net_profit(sell_price, buy_price)
+    derpy = bool(purchase.get("derpy_active", 0))
+    c_fee = creation_fee(sell_price)
+    col_fee = collection_fee(sell_price, derpy_active=derpy)
+    tax = c_fee + col_fee
+    net_pnl = net_revenue(sell_price, derpy_active=derpy) - buy_price
     roi_pct = (net_pnl / buy_price) * 100.0 if buy_price > 0 else 0.0
     hold_sec = max(0.0, (sell_ts - buy_ts) / 1000.0)
     effective_tax_pct = (tax / sell_price) * 100.0 if sell_price > 0 else 0.0
@@ -121,6 +127,8 @@ def handle_mark_sold(args: argparse.Namespace, db: DatabaseManager) -> int:
         net_realized_pnl=net_pnl,
         status="SOLD",
         notes=args.notes,
+        derpy_active=1 if derpy else 0,
+        fee_model_version=2,
     )
 
     if success:
@@ -130,7 +138,7 @@ def handle_mark_sold(args: argparse.Namespace, db: DatabaseManager) -> int:
         print("=======================================================")
         print(f"  Buy Price:          {buy_price:,} coins")
         print(f"  Realized Sale Price: {sell_price:,} coins")
-        print(f"  Progressive AH Tax: {tax:,} coins ({effective_tax_pct:.2f}%)")
+        print(f"  Auction House Fees: {tax:,} coins (Creation: {c_fee:,}, Collection: {col_fee:,}) ({effective_tax_pct:.2f}%)")
         print(f"  Net Realized PnL:   {pnl_sign}{net_pnl:,} coins ({roi_pct:.2f}%)")
         print(f"  Hold Duration:      {format_duration(hold_sec)}")
         print("=======================================================\n")

@@ -41,17 +41,18 @@ def test_profitable_flip_detection(base_config: Settings):
     assert result.auction_uuid == "test-uuid-1"
     assert result.buy_price == 10_000_000
     assert result.target_resell_price == 15_000_000
-    # Net revenue = 15,000,000 * 0.98 = 14,700,000
-    # Net profit = 14,700,000 - 10,000,000 = 4,700,000
-    assert result.net_profit == 4_700_000
-    # Margin = 4,700,000 / 10,000,000 * 100 = 47.0%
-    assert result.margin_pct == 47.0
+    # Recomputed by hand per Phase 1 fee model (10M-100M tier: 2% creation fee + 1% collection fee = 3%):
+    # Net revenue = 15,000,000 - 300,000 - 150,000 = 14,550,000
+    # Net profit = 14,550,000 - 10,000,000 = 4,550,000
+    assert result.net_profit == 4_550_000
+    # Margin = 4,550,000 / 10,000,000 * 100 = 45.5%
+    assert result.margin_pct == 45.5
     assert result.dungeon_stars == 5
     assert result.rarity_upgrades == 1
 
 
 def test_ah_tax_deduction_accuracy(base_config: Settings):
-    """Verify exact 2% AH tax calculation on target resell price."""
+    """Verify exact AH fee calculation (creation fee + collection fee) on target resell price."""
     evaluator = FlipEvaluator(base_config)
     evaluator.set_price_cache({"NECRON_CHESTPLATE": [20_000_000, 25_000_000, 26_000_000]})
 
@@ -61,9 +62,11 @@ def test_ah_tax_deduction_accuracy(base_config: Settings):
     result = evaluator.evaluate_listing(auction, decoded)
     assert result is not None
 
-    expected_net_revenue = 25_000_000 * (1.0 - 0.02)  # 24,500,000
-    expected_profit = int(expected_net_revenue - 20_000_000)  # 4,500,000
-    expected_margin = (expected_profit / 20_000_000) * 100.0  # 22.5%
+    # Recomputed by hand per Phase 1 fee model (25M in 10M-100M tier: 2% creation + 1% collection):
+    # Creation fee = 500,000, Collection fee = 250,000. Total = 750,000.
+    expected_net_revenue = 25_000_000 - 500_000 - 250_000  # 24,250,000
+    expected_profit = int(expected_net_revenue - 20_000_000)  # 4,250,000
+    expected_margin = (expected_profit / 20_000_000) * 100.0  # 21.25%
 
     assert result.net_profit == expected_profit
     assert result.margin_pct == round(expected_margin, 2)
@@ -403,20 +406,22 @@ def test_non_staple_rejection_at_relaxed_margin(base_config: Settings):
 def test_non_staple_rejection_at_8pct_margin_with_high_coin_profit(base_config: Settings):
     """Verify non-staples with >1M coin profit but <15% margin are rejected, while staples pass."""
     evaluator = FlipEvaluator(base_config)
-    # Buy at 20M, resell at 22.2M -> Net revenue 21,756,000, profit 1,756,000 (>1M), margin 8.78% (>=8%, <15%)
+    # Recomputed by hand per Phase 1 fee model (10M-100M: 2% creation + 1% collection = 3%):
+    # Buy at 20M, resell at 22.5M -> Net revenue 22,500,000 * 0.97 = 21,825,000.
+    # Profit = 1,825,000 (>1M), margin = 1,825,000 / 20M = 9.125% (>=8% staple threshold, <15% standard threshold).
     evaluator.set_price_cache({
-        "FARMING_TOOL": [20_000_000, 22_200_000, 23_000_000],
-        "NECRON_CHESTPLATE": [20_000_000, 22_200_000, 23_000_000],
+        "FARMING_TOOL": [20_000_000, 22_500_000, 23_000_000],
+        "NECRON_CHESTPLATE": [20_000_000, 22_500_000, 23_000_000],
     })
 
-    # Non-staple fails because 8.78% < 15.0%
+    # Non-staple fails because 9.125% < 15.0%
     non_staple_result = evaluator.evaluate_listing(
         {"uuid": "tool-1", "starting_bid": 20_000_000},
         {"internal_id": "FARMING_TOOL", "item_name": "Farming Tool"},
     )
     assert non_staple_result is None
 
-    # Staple passes because 8.78% >= 8.0% and 1.756M >= 500k
+    # Staple passes because 9.125% >= 8.0% and 1.825M >= 500k
     staple_result = evaluator.evaluate_listing(
         {"uuid": "necron-1", "starting_bid": 20_000_000},
         {"internal_id": "NECRON_CHESTPLATE", "item_name": "Necron's Chestplate"},
@@ -424,7 +429,7 @@ def test_non_staple_rejection_at_8pct_margin_with_high_coin_profit(base_config: 
     assert staple_result is not None
     assert staple_result.is_priority is True
     assert staple_result.staple_category == "WITHER_ARMOR"
-    assert staple_result.net_profit == 1_756_000
+    assert staple_result.net_profit == 1_825_000
 
 
 def test_progression_staple_rejection_below_relaxed_thresholds(base_config: Settings):
