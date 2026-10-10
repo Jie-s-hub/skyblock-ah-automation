@@ -602,7 +602,9 @@ def test_regression_goblin_3m_listing_with_tight_comps(test_db):
         flip = evaluator.evaluate_listing(cand[0], cand[1])
         assert flip is not None, f"Failed to alert with derpy={derpy}"
         assert flip.auction_uuid == "cand-3m"
-        assert flip.target_resell_price == 5_000_000  # min(5.2M, comps median 5.0M)
+        # Hand-computed for Phase 5: quick-sale quantile (0.25) of [4.95M, 5.0M, 5.0M, 5.05M] is 4,987,500
+        assert flip.target_resell_price == 4_987_500
+        assert flip.optimistic_target == 5_000_000  # Median shown as optimistic target
         assert flip.net_profit >= 500_000
         assert flip.margin_pct >= 10.0
 

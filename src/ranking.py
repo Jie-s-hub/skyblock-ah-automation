@@ -115,10 +115,33 @@ def compute_confidence_score(flip: Any) -> tuple[float, str]:
     if label == "HIGH" and comp_count < min_comps_val:
         label = "MEDIUM"
 
+    # Phase 5: The HIGH rule also requires profit on the quick-sale value
+    # to meet the minimum profit and margin settings
+    if label == "HIGH":
+        cfg = getattr(flip, "config", None)
+        min_p = getattr(cfg, "MIN_PROFIT_COINS", 500_000) if cfg else 500_000
+        min_m = getattr(cfg, "MIN_PROFIT_MARGIN_PCT", 10.0) if cfg else 10.0
+        quick_target = getattr(flip, "conservative_target", None) or getattr(flip, "target_resell_price", None)
+        buy_p = int(getattr(flip, "buy_price", 0))
+        if quick_target is not None and buy_p > 0:
+            from src.constants.taxes import net_revenue
+
+            derpy_active = getattr(flip, "derpy_active", False)
+            derpy_rate = getattr(cfg, "DERPY_COLLECTION_FEE_RATE", 0.04) if cfg else 0.04
+            q_net_rev = net_revenue(quick_target, derpy_active=derpy_active, derpy_rate=derpy_rate)
+            q_profit = q_net_rev - buy_p
+            q_margin = (q_profit / buy_p) * 100.0
+            if q_profit < min_p or q_margin < min_m:
+                label = "MEDIUM"
+
     return (round(final_score, 1), label)
 
 
-def score_and_rank_flip(flip: Any, config: Optional[Settings] = None) -> Any:
+def score_and_rank_flip(
+    flip: Any,
+    config: Optional[Settings] = None,
+    db: Optional[Any] = None,
+) -> Any:
     """
     Populate capital efficiency metrics and multi-factor confidence scoring onto a FlipResult.
     """
@@ -127,6 +150,20 @@ def score_and_rank_flip(flip: Any, config: Optional[Settings] = None) -> Any:
     min_hold_h = getattr(cfg, "MIN_HOLD_TIME_HOURS", None) if cfg else None
     min_comps_high = getattr(cfg, "MIN_COMPS_FOR_HIGH", 5) if cfg else 5
 
+    # Check for empirical median time_to_sell from db if >= 10 samples
+    empirical_time_s = None
+    empirical_count = 0
+    database = db or getattr(flip, "db", None)
+    if database is not None and hasattr(database, "get_empirical_median_time_to_sell"):
+        emp_res = database.get_empirical_median_time_to_sell(
+            internal_id=getattr(flip, "internal_id", ""),
+            features_hash=getattr(flip, "features_hash", None),
+            min_samples=10,
+        )
+        if emp_res is not None:
+            empirical_time_s = emp_res
+            empirical_count = 10
+
     hold_hours, ces = calculate_capital_efficiency(
         net_profit=int(getattr(flip, "net_profit", 0)),
         buy_price=int(getattr(flip, "buy_price", 0)),
@@ -134,6 +171,8 @@ def score_and_rank_flip(flip: Any, config: Optional[Settings] = None) -> Any:
         queue_depth=int(getattr(flip, "queue_depth", 0)),
         min_hold_hours=min_hold_h,
         enable_queue_depth=enable_qd,
+        empirical_median_time_to_sell_s=empirical_time_s,
+        empirical_sample_count=empirical_count,
     )
     conf_score, conf_label = compute_confidence_score(flip)
 
@@ -164,6 +203,25 @@ def score_and_rank_flip(flip: Any, config: Optional[Settings] = None) -> Any:
     if conf_label == "HIGH" and comp_count < min_comps_high:
         conf_label = "MEDIUM"
         conf_score = min(conf_score, 74.9)
+
+    # Phase 5: The HIGH rule also requires profit on the quick-sale value
+    # to meet the minimum profit and margin settings
+    if conf_label == "HIGH":
+        min_p = getattr(cfg, "MIN_PROFIT_COINS", 500_000) if cfg else 500_000
+        min_m = getattr(cfg, "MIN_PROFIT_MARGIN_PCT", 10.0) if cfg else 10.0
+        quick_target = getattr(flip, "conservative_target", None) or getattr(flip, "target_resell_price", None)
+        buy_p = int(getattr(flip, "buy_price", 0))
+        if quick_target is not None and buy_p > 0:
+            from src.constants.taxes import net_revenue
+
+            derpy_active = getattr(flip, "derpy_active", False)
+            derpy_rate = getattr(cfg, "DERPY_COLLECTION_FEE_RATE", 0.04) if cfg else 0.04
+            q_net_rev = net_revenue(quick_target, derpy_active=derpy_active, derpy_rate=derpy_rate)
+            q_profit = q_net_rev - buy_p
+            q_margin = (q_profit / buy_p) * 100.0
+            if q_profit < min_p or q_margin < min_m:
+                conf_label = "MEDIUM"
+                conf_score = min(conf_score, 74.9)
 
     flip.estimated_hold_hours = hold_hours
     flip.capital_efficiency = ces

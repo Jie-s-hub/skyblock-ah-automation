@@ -245,6 +245,10 @@ class Settings(BaseSettings):
         default=0.25,
         description="Maximum allowed divergence (25%) before comps valuation falls back to conservative Path B baseline",
     )
+    QUICK_SALE_QUANTILE: float = Field(
+        default=0.25,
+        description="Quantile for quick-sale comps target pricing (default: 0.25)",
+    )
     MIN_COMPS_FOR_HIGH: int = Field(
         default=5,
         description="Minimum same-bucket sales in the comps window required for HIGH confidence (default: 5)",

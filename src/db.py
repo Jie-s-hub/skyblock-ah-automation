@@ -720,6 +720,53 @@ class DatabaseManager:
         cur = conn.execute(query, tuple(params))
         return [dict(r) for r in cur.fetchall()]
 
+    def get_empirical_median_time_to_sell(
+        self,
+        internal_id: str,
+        features_hash: Optional[str] = None,
+        min_samples: int = 10,
+    ) -> Optional[float]:
+        """
+        Query empirical median time_to_sell_s from sales_history.
+        Checks specific features_hash first; falls back to internal_id.
+        Returns median duration in seconds if >= min_samples exist, otherwise None.
+        """
+        conn = self._get_connection()
+        try:
+            if features_hash:
+                cur = conn.execute(
+                    """
+                    SELECT time_to_sell_s FROM sales_history
+                    WHERE internal_id = ? AND features_hash = ? AND time_to_sell_s IS NOT NULL AND time_to_sell_s > 0
+                    ORDER BY timestamp DESC LIMIT 200;
+                    """,
+                    (internal_id, features_hash),
+                )
+                rows = [float(r[0]) for r in cur.fetchall()]
+                if len(rows) >= min_samples:
+                    rows.sort()
+                    mid = len(rows) // 2
+                    median_s = rows[mid] if len(rows) % 2 == 1 else (rows[mid - 1] + rows[mid]) / 2.0
+                    return float(median_s)
+
+            cur = conn.execute(
+                """
+                SELECT time_to_sell_s FROM sales_history
+                WHERE internal_id = ? AND time_to_sell_s IS NOT NULL AND time_to_sell_s > 0
+                ORDER BY timestamp DESC LIMIT 200;
+                """,
+                (internal_id,),
+            )
+            rows = [float(r[0]) for r in cur.fetchall()]
+            if len(rows) >= min_samples:
+                rows.sort()
+                mid = len(rows) // 2
+                median_s = rows[mid] if len(rows) % 2 == 1 else (rows[mid - 1] + rows[mid]) / 2.0
+                return float(median_s)
+        except Exception as err:
+            logger.debug("Failed to query empirical time to sell for %s: %s", internal_id, err)
+        return None
+
     # -----------------------------------------------------------------------
     # 4. Bazaar Snapshots Operations
     # -----------------------------------------------------------------------

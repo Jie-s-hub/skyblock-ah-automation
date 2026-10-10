@@ -33,11 +33,13 @@ class CompsResult:
     divergence_pct: float = 0.0
     p25_price: int = 0
     p75_price: int = 0
+    quick_sale_price: int = 0
 
 
 def calculate_iqr_bounds(prices: list[int]) -> tuple[float, float, int]:
     """
     Calculate Interquartile Range (IQR) and outer scrubbing bounds [Q1 - 1.5*IQR, Q3 + 1.5*IQR].
+    Phase 5: Only scrubs outliers when n >= 8; below that, don't trim (lower_bound=0.0, upper_bound=inf).
     Returns (lower_bound, upper_bound, iqr_spread).
     """
     if len(prices) < 4:
@@ -61,33 +63,45 @@ def calculate_iqr_bounds(prices: list[int]) -> tuple[float, float, int]:
     q1 = percentile(0.25)
     q3 = percentile(0.75)
     iqr = q3 - q1
+
+    if n < 8:
+        # Phase 5: IQR scrubbing only when n >= 8; below that, don't trim.
+        return (0.0, float("inf"), int(round(iqr)))
+
     lower_bound = max(0.0, q1 - 1.5 * iqr)
     upper_bound = q3 + 1.5 * iqr
     return (lower_bound, upper_bound, int(round(iqr)))
 
 
-def calculate_weighted_median(items: list[tuple[int, float]]) -> int:
+def calculate_weighted_quantile(items: list[tuple[int, float]], q: float) -> int:
     """
-    Compute time-weighted median from a list of (price, weight) pairs.
+    Compute time-decayed weighted quantile q in [0.0, 1.0] from a list of (price, weight) pairs.
     """
     if not items:
         return 0
     if len(items) == 1:
         return items[0][0]
 
-    # Sort pairs by price ascending
     sorted_items = sorted(items, key=lambda x: x[0])
     total_weight = sum(w for _, w in sorted_items)
     if total_weight <= 0:
-        return sorted_items[len(sorted_items) // 2][0]
+        idx = min(len(sorted_items) - 1, max(0, int(round(q * (len(sorted_items) - 1)))))
+        return sorted_items[idx][0]
 
     cumulative = 0.0
-    cutoff = total_weight * 0.5
+    cutoff = total_weight * max(0.0, min(1.0, q))
 
     for price, w in sorted_items:
         cumulative += w
         if cumulative >= cutoff:
             return price
+
+    return sorted_items[-1][0]
+
+
+def calculate_weighted_median(items: list[tuple[int, float]]) -> int:
+    """Compute time-weighted median (q=0.50) from (price, weight) pairs."""
+    return calculate_weighted_quantile(items, 0.50)
 
 def calculate_percentiles(prices: list[int]) -> tuple[int, int]:
     """Calculate P25 and P75 on prices."""
@@ -338,11 +352,14 @@ class CompsEvaluator:
             weighted_pairs = [(p, 1.0) for p in raw_prices]
             cleaned_prices = raw_prices
 
-        median_price = calculate_weighted_median(weighted_pairs)
+        quick_sale_q = getattr(self.config, "QUICK_SALE_QUANTILE", 0.25)
+        quick_sale_price = calculate_weighted_quantile(weighted_pairs, quick_sale_q)
+        p25_price = calculate_weighted_quantile(weighted_pairs, 0.25)
+        median_price = calculate_weighted_quantile(weighted_pairs, 0.50)
+        p75_price = calculate_weighted_quantile(weighted_pairs, 0.75)
 
         # Recalculate IQR on scrubbed prices
         _, _, scrubbed_iqr = calculate_iqr_bounds(cleaned_prices)
-        p25_price, p75_price = calculate_percentiles(cleaned_prices)
 
         # Confidence calculation
         n = len(cleaned_prices)
@@ -353,7 +370,7 @@ class CompsEvaluator:
 
         # Cross-check against Path B addon math
         is_divergent = False
-        conservative_resell = min(p25_price, median_price) if p25_price > 0 else median_price
+        conservative_resell = min(quick_sale_price, median_price) if quick_sale_price > 0 else median_price
         divergence_pct = 0.0
         max_div = getattr(self.config, "COMPS_MAX_PATH_B_DIVERGENCE", 0.25)
 
@@ -384,4 +401,5 @@ class CompsEvaluator:
             divergence_pct=round(divergence_pct * 100.0, 2),
             p25_price=p25_price,
             p75_price=p75_price,
+            quick_sale_price=quick_sale_price,
         )

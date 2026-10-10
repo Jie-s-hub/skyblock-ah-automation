@@ -1601,6 +1601,8 @@ class FlipEvaluator:
         # Calculate comps distribution
         sale_prices = sorted([int(s["price"]) for s in matching_sales])
         comp_count = len(sale_prices)
+        quick_sale_q = getattr(self.config, "QUICK_SALE_QUANTILE", 0.25)
+        comp_quick_sale = int(round(calculate_percentile(sale_prices, quick_sale_q)))
         comp_median = int(round(calculate_percentile(sale_prices, 0.50)))
         comps_pctile = getattr(self.config, "PET_COMPS_PERCENTILE", 0.75)
         comp_p75 = int(round(calculate_percentile(sale_prices, comps_pctile)))
@@ -1627,14 +1629,14 @@ class FlipEvaluator:
                     pass
 
         # Target resell price calculation:
-        # Phase 2d: min(model target, same-bucket sold-comps value)
-        # Model target comes from lowest valid other active listing (ref_price), else comp_median
+        # Phase 5: min(model target, same-bucket sold-comps quick-sale value)
+        # Model target comes from lowest valid other active listing (ref_price), else comp_quick_sale
         if ref_price is not None:
             model_target = ref_price
-            baseline_source = "BUCKET_REF_AND_COMPS_MEDIAN"
+            baseline_source = "BUCKET_REF_AND_COMPS_QUICK_SALE"
         else:
-            model_target = comp_median
-            baseline_source = "COMPS_MEDIAN"
+            model_target = comp_quick_sale
+            baseline_source = "COMPS_QUICK_SALE"
 
         # Pet candy penalty if applicable
         if pet_candy_used > 0:
@@ -1662,9 +1664,9 @@ class FlipEvaluator:
                     model_target = ceiling
                     is_craft_capped = True
 
-        # Phase 2d: Resale target = min(model target, same-bucket sold-comps value)
+        # Phase 5: Resale target = min(model target, same-bucket sold-comps quick-sale value)
         # Model may only lower the target, never raise it above what recent sales support.
-        target_resell = min(model_target, comp_median)
+        target_resell = min(model_target, comp_quick_sale)
 
         if target_resell <= buy_price:
             return None
@@ -1674,10 +1676,15 @@ class FlipEvaluator:
             return None
 
         target_resell = self._apply_economic_hardening(target_resell, "PET_BUCKET")
+        optimistic_target = min(ref_price or comp_median, comp_median)
+        optimistic_target = self._apply_economic_hardening(optimistic_target, "PET_BUCKET")
 
         net_revenue = self.calculate_net_revenue(target_resell)
         net_profit = int(net_revenue - buy_price)
         margin_pct = (net_profit / buy_price) * 100.0
+
+        opt_net_revenue = self.calculate_net_revenue(optimistic_target)
+        optimistic_upside = max(0, int(opt_net_revenue - buy_price))
 
         if (
             net_profit < self.config.MIN_PROFIT_COINS
@@ -1756,9 +1763,9 @@ class FlipEvaluator:
             craft_cost=craft_cost,
             is_craft_capped=is_craft_capped,
             conservative_target=target_resell,
-            optimistic_target=target_resell,
+            optimistic_target=optimistic_target,
             expected_profit=net_profit,
-            optimistic_upside=net_profit,
+            optimistic_upside=optimistic_upside,
             queue_depth=queue_depth,
         )
 
@@ -1825,10 +1832,12 @@ class FlipEvaluator:
         p25 = comps_res.p25_price
         p75 = comps_res.p75_price
         median = comps_res.median_price
+        quick_sale = comps_res.quick_sale_price or p25 or median
 
-        # Conservative baseline (P25 or Median, capped by Path B if divergent)
-        conservative_target = comps_res.conservative_resell or (p25 if p25 > 0 else median)
-        optimistic_target = p75 if p75 > 0 else median
+        # Conservative baseline using QUICK_SALE_QUANTILE (capped by Path B if divergent)
+        conservative_target = comps_res.conservative_resell or quick_sale
+        # Median is shown as the optimistic target (Phase 5)
+        optimistic_target = median if median > 0 else (p75 if p75 > 0 else conservative_target)
 
         target_resell = conservative_target
         if target_resell <= buy_price:
@@ -1987,7 +1996,7 @@ class FlipEvaluator:
         if getattr(self.config, "ENABLE_CAPITAL_EFFICIENCY", True):
             from src.ranking import score_and_rank_flip
 
-            flip = score_and_rank_flip(flip, self.config)
+            flip = score_and_rank_flip(flip, self.config, db=self.db)
             min_ces = getattr(self.config, "MIN_CAPITAL_EFFICIENCY", 0.0)
             if min_ces > 0.0 and (flip.capital_efficiency or 0.0) < min_ces:
                 return None

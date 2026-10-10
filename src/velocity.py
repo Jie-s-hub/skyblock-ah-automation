@@ -173,6 +173,18 @@ class SalesVelocityTracker:
         daily_rate = (sales_in_window / w_hours) * 24.0
         return round(daily_rate, 2)
 
+    def get_hourly_velocity(
+        self,
+        internal_id: str,
+        window_hours: Optional[float] = None,
+        now: Optional[float] = None,
+    ) -> float:
+        """
+        Calculate the estimated hourly sales volume (sales per hour) for internal_id.
+        """
+        daily = self.get_daily_velocity(internal_id, window_hours=window_hours, now=now)
+        return round(daily / 24.0, 4)
+
     def is_velocity_sufficient(
         self,
         internal_id: str,

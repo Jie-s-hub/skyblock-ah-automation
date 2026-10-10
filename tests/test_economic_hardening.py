@@ -237,10 +237,12 @@ def test_distribution_aligned_gating_drops_p75_only_flips(temp_db):
     assert good_result.buy_price == 7_000_000
     assert good_result.conservative_target == 10_000_000
     assert good_result.expected_profit > 2_000_000
-    # Optimistic upside exposed from P75 price
+    # Phase 5 update: optimistic_target now exposes the median (p50) instead of p75.
+    # For comps [10M, 10M, 11M, 20M], weighted p50 is 10,000,000 (equal to p25 conservative_target).
     assert good_result.optimistic_target is not None
-    assert good_result.optimistic_target > good_result.conservative_target
-    assert good_result.optimistic_upside > good_result.expected_profit
+    assert good_result.optimistic_target == 10_000_000
+    assert good_result.conservative_target == 10_000_000
+    assert good_result.optimistic_upside >= good_result.expected_profit
 
 
 # ---------------------------------------------------------------------------
