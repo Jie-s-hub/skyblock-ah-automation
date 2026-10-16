@@ -232,7 +232,7 @@ def build_health_embed(telemetry: Optional[PipelineTelemetry] = None) -> dict[st
 
     # Latencies breakdown string
     latencies = metrics["average_latencies_ms"]
-    common_stages = ["fetch", "decode", "eval", "alert", "cycle_total"]
+    common_stages = ["fetch", "decode", "cache", "eval", "alert", "cycle_total"]
     latency_lines = []
     for stage in common_stages:
         if stage in latencies:
@@ -326,6 +326,26 @@ class SurvivalAuditor:
         self.db = db
         self.velocity_tracker = velocity_tracker
         self.config = config or Settings(DRY_RUN=True)
+        self._stats_cache: Optional[dict[str, dict[str, Any]]] = None
+        self._stats_cache_bucket: int = -1
+        self._snapshot_loaded: bool = False
+
+    def set_cached_stats(self, stats: Optional[dict[str, dict[str, Any]]]) -> None:
+        """Populate conversion stats from a pre-aggregated MarketTelemetrySnapshot (zero hot-path DB I/O)."""
+        self._stats_cache = dict(stats) if stats is not None else {}
+        self._snapshot_loaded = True
+
+    def refresh_stats_cache(
+        self,
+        window_hours: float = 24.0,
+        now_ms: Optional[float] = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Explicitly refresh in-memory conversion stats cache from SQLite (for background housekeeping)."""
+        effective_now = now_ms if now_ms is not None else (time.time() * 1000.0)
+        stats = self.db.get_lane_conversion_stats(window_hours=window_hours, now_ms=effective_now)
+        self._stats_cache = stats
+        self._stats_cache_bucket = int(effective_now // 60_000)
+        return stats
 
     def audit_cycle(
         self,
@@ -371,6 +391,8 @@ class SurvivalAuditor:
                     self.db.update_alert_survival(uuid, status, elapsed_seconds, int(now_ms))
                     results[status] += 1
 
+        # Refresh in-memory conversion stats cache at the end of background audit cycle
+        self.refresh_stats_cache(now_ms=now_ms)
         return dict(results)
 
     def get_lane_conversion_rate(
@@ -380,7 +402,16 @@ class SurvivalAuditor:
         now_ms: Optional[float] = None,
     ) -> float:
         """Calculate recent conversion rate (sniped / (sniped + stale)) for a valuation lane."""
-        stats = self.db.get_lane_conversion_stats(window_hours=window_hours, now_ms=now_ms)
+        if self._snapshot_loaded and self._stats_cache is not None:
+            stats = self._stats_cache
+        else:
+            effective_now = now_ms if now_ms is not None else (time.time() * 1000.0)
+            bucket = int(effective_now // 60_000)
+            if self._stats_cache is None or self._stats_cache_bucket != bucket:
+                stats = self.refresh_stats_cache(window_hours=window_hours, now_ms=effective_now)
+            else:
+                stats = self._stats_cache
+
         lane_data = stats.get(lane)
         if not lane_data:
             return 1.0

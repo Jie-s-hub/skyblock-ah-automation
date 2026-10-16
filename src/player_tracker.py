@@ -73,6 +73,8 @@ class PlayerTradeTracker:
         self._owns_session = False
         self._uuid_cache: dict[str, str] = {}
         self.notifier = notifier
+        if getattr(self.config, "TRACKED_PLAYER_UUID", None):
+            self.set_tracked_uuid(self.config.TRACKED_PLAYER_UUID)
 
     def set_tracked_uuid(self, uuid: str) -> None:
         """Explicitly set tracked player UUID (normalized without dashes)."""
@@ -86,6 +88,12 @@ class PlayerTradeTracker:
             self._owns_session = True
         return self._session
 
+    async def __aenter__(self) -> "PlayerTradeTracker":
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.close()
+
     async def close(self) -> None:
         """Close session if owned."""
         if self._owns_session and self._session and not self._session.closed:
@@ -96,6 +104,10 @@ class PlayerTradeTracker:
         Query the official Mojang API to resolve and cache player username to UUID.
         URL: https://api.mojang.com/users/by/username/{username}
         """
+        if getattr(self.config, "TRACKED_PLAYER_UUID", None):
+            self.set_tracked_uuid(self.config.TRACKED_PLAYER_UUID)
+            return self.tracked_uuid
+
         ign_clean = self.tracked_ign.strip().lower()
         if ign_clean in self._uuid_cache:
             self.tracked_uuid = self._uuid_cache[ign_clean]
@@ -321,6 +333,19 @@ class PlayerTradeTracker:
             "held_items_count": len(held_items),
             "unrealized_capital_deployed": unrealized_capital,
         }
+
+    def get_open_positions(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Retrieve open/held inventory positions."""
+        return self.db.get_purchases(status="HELD", limit=limit)
+
+    def get_recent_trades(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Retrieve recently completed/sold flip trades."""
+        conn = self.db.get_connection()
+        cur = conn.execute(
+            "SELECT * FROM purchases WHERE status = 'SOLD' ORDER BY realized_sell_timestamp DESC, buy_timestamp DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(row) for row in cur.fetchall()]
 
 
 # Convenience alias for tracker

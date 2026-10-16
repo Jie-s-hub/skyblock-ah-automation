@@ -226,14 +226,25 @@ class BacktestEngine:
             if tts_s is None and alert.get("listing_start"):
                 tts_s = max(0.0, (sale_ts - int(alert["listing_start"])) / 1000.0)
 
+            # Fallback to empirical lane survival / sell time when missing
+            if tts_s is None:
+                if self.evaluator and getattr(self.evaluator, "telemetry_snapshot", None):
+                    snap = self.evaluator.telemetry_snapshot
+                    tts_s = snap.empirical_sell_times.get(internal_id)
+                elif hasattr(self.db, "get_empirical_median_time_to_sell"):
+                    tts_s = self.db.get_empirical_median_time_to_sell(internal_id)
+
             if reaction_delay_s > 0 and tts_s is not None and tts_s <= reaction_delay_s:
                 # Missed: sniped before reaction delay
                 continue
 
-            # 4. Competing-sniper model: probability of fill decays with discount depth
+            # 4. Competing-sniper model: probability of fill decays with discount depth and empirical survival curve
             if enable_competing_model:
                 discount_depth = max(0.0, float(estimated_resell - buy_price) / max(1.0, float(estimated_resell)))
                 fill_prob = math.exp(-2.0 * discount_depth)
+                if tts_s is not None and tts_s > 0:
+                    # Items with shorter survival have lower probability of player fill before competing bots
+                    fill_prob *= min(1.0, math.sqrt(tts_s / 30.0))
                 fill_prob = max(0.05, min(1.0, fill_prob))
                 if rng.random() > fill_prob:
                     # Missed: competing sniper captured the flip

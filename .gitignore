@@ -68,3 +68,8 @@ client-mod/.gradle/
 *.sqlite
 *.sqlite3
 *.log
+*.log.gz
+logs/
+client-mod/logs/
+client-mod/build/
+

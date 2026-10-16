@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Optional
 
 from src.capital_efficiency import calculate_capital_efficiency
 from src.config import Settings
+from src.db import MarketTelemetrySnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -140,27 +142,31 @@ def score_and_rank_flip(
     flip: Any,
     config: Optional[Settings] = None,
     db: Optional[Any] = None,
+    telemetry_snapshot: Optional[MarketTelemetrySnapshot] = None,
 ) -> Any:
     """
-    Populate capital efficiency metrics and multi-factor confidence scoring onto a FlipResult.
+    Populate capital efficiency metrics, liquidity-adjusted capital velocity,
+    and multi-factor confidence scoring onto a FlipResult.
     """
     cfg = config or (getattr(flip, "config", None) if hasattr(flip, "config") else None)
     enable_qd = getattr(cfg, "ENABLE_QUEUE_DEPTH_HOLD_TIME", True) if cfg else True
     min_hold_h = getattr(cfg, "MIN_HOLD_TIME_HOURS", None) if cfg else None
     min_comps_high = getattr(cfg, "MIN_COMPS_FOR_HIGH", 5) if cfg else 5
 
-    # Check for empirical median time_to_sell from db if >= 10 samples
+    # Check for empirical median time_to_sell: prioritize O(1) in-memory snapshot
     empirical_time_s = None
     empirical_count = 0
-    database = db or getattr(flip, "db", None)
-    if database is not None and hasattr(database, "get_empirical_median_time_to_sell"):
-        emp_res = database.get_empirical_median_time_to_sell(
-            internal_id=getattr(flip, "internal_id", ""),
-            features_hash=getattr(flip, "features_hash", None),
-            min_samples=10,
-        )
-        if emp_res is not None:
-            empirical_time_s = emp_res
+    internal_id = getattr(flip, "internal_id", "")
+    features_hash = getattr(flip, "features_hash", None)
+
+    snapshot = telemetry_snapshot or getattr(flip, "telemetry_snapshot", None)
+    if snapshot is not None and hasattr(snapshot, "empirical_sell_times"):
+        emp_key = f"{internal_id}:{features_hash}" if features_hash else None
+        if emp_key and emp_key in snapshot.empirical_sell_times:
+            empirical_time_s = snapshot.empirical_sell_times[emp_key]
+            empirical_count = 10
+        elif internal_id in snapshot.empirical_sell_times:
+            empirical_time_s = snapshot.empirical_sell_times[internal_id]
             empirical_count = 10
 
     hold_hours, ces = calculate_capital_efficiency(
@@ -226,4 +232,26 @@ def score_and_rank_flip(
     flip.capital_efficiency = ces
     flip.confidence_score = conf_score
     flip.confidence_label = conf_label
+
+    # Phase 4.2: Liquidity-Adjusted Capital Velocity
+    # Score = CES * ConfidenceWeight * LiquidityMultiplier * PortfolioConcentrationPenalty
+    confidence_weights = {"HIGH": 1.0, "MEDIUM": 0.70, "LOW": 0.35}
+    w_conf = confidence_weights.get(conf_label, 0.70)
+    daily_sales = getattr(flip, "daily_velocity", None)
+    if daily_sales is None or daily_sales <= 0:
+        daily_sales = 15.0
+    liq_mult = min(1.0, float(daily_sales) / 15.0) ** 0.5
+
+    n_held = 0
+    if snapshot is not None and internal_id in snapshot.open_holdings:
+        n_held = snapshot.open_holdings[internal_id]
+    elif hasattr(flip, "open_holdings") and isinstance(flip.open_holdings, int):
+        n_held = flip.open_holdings
+
+    conc_penalty = math.exp(-0.5 * n_held)
+    velocity_score = (ces or 0.0) * w_conf * liq_mult * conc_penalty
+    if n_held >= 3:
+        flip.portfolio_concentration_warning = "PORTFOLIO_CONCENTRATION_EXCEEDED"
+    flip.capital_velocity_score = round(velocity_score, 2)
+
     return flip

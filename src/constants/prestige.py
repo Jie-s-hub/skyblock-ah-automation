@@ -78,3 +78,57 @@ def is_divan_piece(internal_id: str) -> bool:
     """Return True if the item is a Divan's Armor piece."""
     clean_id = (internal_id or "").strip().upper()
     return clean_id in DIVAN_ARMOR_PIECES or clean_id.startswith("DIVAN_")
+
+
+# Crimson Isle equipment & secondary items that use Crimson stars (1-10)
+CRIMSON_ISLE_EQUIPMENT_PREFIXES: tuple[str, ...] = (
+    "MOLTEN_",
+    "VANQUISHED_",
+    "RAMPART_",
+    "GILLSPLASH_",
+    "THUNDER_",
+    "MAGMA_LORD_",
+)
+
+CRIMSON_ISLE_ITEMS: set[str] = {
+    "LAVA_SHELL_NECKLACE",
+    "DELIRIUM_NECKLACE",
+    "TAURUS_HELMET",
+    "FLAMING_CHESTPLATE",
+    "FLAMING_FIST",
+    "MOOGMA_LEGGINGS",
+    "SLUG_BOOTS",
+    "GAUNTLET_OF_CONTAGION",
+    "IMPLOSION_BELT",
+    "SCOVILLE_BELT",
+    "GHAST_CLOAK",
+    "MAGMA_NECKLACE",
+    "GLOWSTONE_GAUNTLET",
+    "BLAZE_BELT",
+    "MAGMA_ROD",
+    "INFERNO_ROD",
+    "HELLFIRE_ROD",
+    "BLADE_OF_THE_VOLCANO",
+    "STAFF_OF_THE_VOLCANO",
+    "FIRE_VEIL_WAND",
+    "RAGNAROCK_AXE",
+}
+
+
+def is_crimson_isle_item(internal_id: str) -> bool:
+    """
+    Return True if the internal ID corresponds to a Crimson Isle item
+    (Kuudra armor, Crimson Isle equipment, Lava fishing gear/rods, or volcanic weapons)
+    whose stars (1-10) are Crimson Stars upgraded with Crimson Essence,
+    NOT Catacombs Master Stars.
+    """
+    if not internal_id:
+        return False
+    clean_id = internal_id.strip().upper()
+    if is_kuudra_armor(clean_id):
+        return True
+    if clean_id in CRIMSON_ISLE_ITEMS:
+        return True
+    if any(clean_id.startswith(p) for p in CRIMSON_ISLE_EQUIPMENT_PREFIXES):
+        return True
+    return False

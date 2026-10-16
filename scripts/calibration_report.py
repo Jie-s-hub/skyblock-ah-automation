@@ -50,6 +50,28 @@ def get_decile_bucket(score: float | None) -> str:
     return "0-9"
 
 
+def compute_percentiles(values: list[float]) -> dict[str, float | None]:
+    """Calculate p10, p50, and p90 percentiles from a list of numerical values."""
+    if not values:
+        return {"p10": None, "p50": None, "p90": None}
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+
+    def get_p(p: float) -> float:
+        k = (n - 1) * p
+        f = int(k)
+        c = min(f + 1, n - 1)
+        if f == c:
+            return sorted_vals[f]
+        return sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f)
+
+    return {
+        "p10": round(get_p(0.10), 1),
+        "p50": round(get_p(0.50), 1),
+        "p90": round(get_p(0.90), 1),
+    }
+
+
 def compute_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute aggregate outcome calibration metrics for a cluster of records."""
     n = len(records)
@@ -60,10 +82,24 @@ def compute_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
             "target_hit_rate": 0.0,
             "mean_pred_margin": 0.0,
             "mean_real_margin": None,
+            "sold_fast_claimed": 0,
+            "seller_cancelled": 0,
+            "survived_multi_tick": 0,
+            "unsold_count": 0,
+            "p10_survival_s": None,
+            "p50_survival_s": None,
+            "p90_survival_s": None,
         }
 
-    sold_fast_count = sum(1 for r in records if r.get("status") == "SOLD_FAST")
+    sold_fast_claimed = sum(1 for r in records if r.get("status") == "SOLD_FAST_CLAIMED")
+    sold_fast_count = sum(1 for r in records if r.get("status") in ("SOLD_FAST", "SOLD_FAST_CLAIMED"))
+    seller_cancelled_count = sum(1 for r in records if r.get("status") == "SELLER_CANCELLED")
+    survived_multi_tick_count = sum(1 for r in records if r.get("status") in ("SURVIVED_MULTI_TICK", "SOLD_SLOW"))
+    unsold_count = sum(1 for r in records if r.get("status") == "UNSOLD")
     target_hit_count = sum(1 for r in records if r.get("target_hit") == 1)
+
+    durations = [float(r["listing_sold_after_s"]) for r in records if r.get("listing_sold_after_s") is not None]
+    pctiles = compute_percentiles(durations)
 
     pred_margins: list[float] = []
     for r in records:
@@ -88,6 +124,13 @@ def compute_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
         "target_hit_rate": round((target_hit_count / n) * 100.0, 2),
         "mean_pred_margin": round(mean_pred, 2),
         "mean_real_margin": round(mean_real, 2) if mean_real is not None else None,
+        "sold_fast_claimed": sold_fast_claimed,
+        "seller_cancelled": seller_cancelled_count,
+        "survived_multi_tick": survived_multi_tick_count,
+        "unsold_count": unsold_count,
+        "p10_survival_s": pctiles["p10"],
+        "p50_survival_s": pctiles["p50"],
+        "p90_survival_s": pctiles["p90"],
     }
 
 
@@ -216,8 +259,66 @@ def generate_report(db: DatabaseManager, csv_path: str | None = None) -> None:
                     "mean_realized_margin_pct": metrics["mean_real_margin"]
                     if metrics["mean_real_margin"] is not None
                     else "",
+                    "sold_fast_claimed": metrics["sold_fast_claimed"],
+                    "seller_cancelled": metrics["seller_cancelled"],
+                    "survived_multi_tick": metrics["survived_multi_tick"],
+                    "p10_survival_s": metrics["p10_survival_s"] if metrics["p10_survival_s"] is not None else "",
+                    "p50_survival_s": metrics["p50_survival_s"] if metrics["p50_survival_s"] is not None else "",
+                    "p90_survival_s": metrics["p90_survival_s"] if metrics["p90_survival_s"] is not None else "",
                 }
             )
+
+    # 3. Group by Lane for Survival Duration & Lifecycle Counts
+    lane_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in records:
+        lane = str(r.get("lane") or "unknown")
+        lane_groups[lane].append(r)
+
+    print("\n--- Breakdown: Lane Survival Duration Percentiles & Lifecycle Counts ---")
+    surv_header_fmt = "{:<20} {:>6} {:>9} {:>9} {:>9} {:>14} {:>12} {:>13}"
+    surv_row_fmt = "{:<20} {:>6} {:>9} {:>9} {:>9} {:>14} {:>12} {:>13}"
+    print(surv_header_fmt.format("Lane", "N", "p10 (s)", "p50 (s)", "p90 (s)", "FAST_CLAIMED", "CANCELLED", "MULTI_TICK"))
+    print("-" * 105)
+
+    for lane, group in sorted(lane_groups.items()):
+        metrics = compute_metrics(group)
+        p10_str = f"{metrics['p10_survival_s']:.1f}" if metrics["p10_survival_s"] is not None else "N/A"
+        p50_str = f"{metrics['p50_survival_s']:.1f}" if metrics["p50_survival_s"] is not None else "N/A"
+        p90_str = f"{metrics['p90_survival_s']:.1f}" if metrics["p90_survival_s"] is not None else "N/A"
+
+        print(
+            surv_row_fmt.format(
+                lane,
+                metrics["n"],
+                p10_str,
+                p50_str,
+                p90_str,
+                metrics["sold_fast_claimed"],
+                metrics["seller_cancelled"],
+                metrics["survived_multi_tick"],
+            )
+        )
+
+        csv_rows.append(
+            {
+                "dimension": "lane_survival",
+                "group_key": lane,
+                "sub_key": "",
+                "n": metrics["n"],
+                "sold_fast_rate_pct": metrics["sold_fast_rate"],
+                "target_hit_rate_pct": metrics["target_hit_rate"],
+                "mean_predicted_margin_pct": metrics["mean_pred_margin"],
+                "mean_realized_margin_pct": metrics["mean_real_margin"]
+                if metrics["mean_real_margin"] is not None
+                else "",
+                "sold_fast_claimed": metrics["sold_fast_claimed"],
+                "seller_cancelled": metrics["seller_cancelled"],
+                "survived_multi_tick": metrics["survived_multi_tick"],
+                "p10_survival_s": metrics["p10_survival_s"] if metrics["p10_survival_s"] is not None else "",
+                "p50_survival_s": metrics["p50_survival_s"] if metrics["p50_survival_s"] is not None else "",
+                "p90_survival_s": metrics["p90_survival_s"] if metrics["p90_survival_s"] is not None else "",
+            }
+        )
 
     print("=" * 86)
 
@@ -234,6 +335,12 @@ def generate_report(db: DatabaseManager, csv_path: str | None = None) -> None:
             "target_hit_rate_pct",
             "mean_predicted_margin_pct",
             "mean_realized_margin_pct",
+            "sold_fast_claimed",
+            "seller_cancelled",
+            "survived_multi_tick",
+            "p10_survival_s",
+            "p50_survival_s",
+            "p90_survival_s",
         ]
         with open(out_p, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)

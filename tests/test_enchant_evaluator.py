@@ -52,7 +52,7 @@ def test_champion_10_progression_no_multiplier(bz_cache: BazaarCache):
     assert networth_cost == 4_000_000
 
 
-@pytest.mark.parametrize("ench_name", ["compact", "cultivating", "expertise", "hecatomb"])
+@pytest.mark.parametrize("ench_name", ["compact", "cultivating", "expertise", "hecatomb", "toxophilite"])
 def test_all_progression_enchants_resolve_to_tier_1_price(bz_cache: BazaarCache, ench_name: str):
     """All progression enchants level through player activity; level 10 resolves strictly to 1 * Tier 1."""
     prod_id = f"ENCHANTMENT_{ench_name.upper()}_1"

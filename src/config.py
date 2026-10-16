@@ -49,6 +49,10 @@ class Settings(BaseSettings):
         default=False,
         description="When True, outputs flip alerts to console instead of sending to Discord",
     )
+    MAX_CONCURRENT_PAGES: int = Field(
+        default=80,
+        description="Maximum concurrent HTTP page requests in fetch_all_auctions",
+    )
 
     # Cosmetic and vanity filtering
     COSMETIC_FILTER_ENABLED: bool = Field(
@@ -187,6 +191,10 @@ class Settings(BaseSettings):
             "auctions (end time passed) are excluded there."
         ),
     )
+    MAX_SNIPE_LISTING_AGE_SECONDS: int = Field(
+        default=0,
+        description="Maximum listing age in seconds for rapid snipe alerts (default: 0 = disabled, recommended: 300s in .env).",
+    )
 
     # Purse budget guardrails
     MAX_PURSE_BUDGET: int = Field(
@@ -226,6 +234,10 @@ class Settings(BaseSettings):
     TRACKED_PLAYER_IGN: str = Field(
         default="ongvvkk",
         description="Player username to automatically track for buy/sell execution and portfolio metrics",
+    )
+    TRACKED_PLAYER_UUID: Optional[str] = Field(
+        default=None,
+        description="Optional explicit UUID for TRACKED_PLAYER_IGN (bypasses Mojang API resolution)",
     )
     ENABLE_PLAYER_TRACKING: bool = Field(
         default=True,
@@ -507,8 +519,12 @@ class Settings(BaseSettings):
 
     # Phase 4: Outcome Labels & Calibration
     ENABLE_OUTCOME_LABELING: bool = Field(
-        default=True,
+        default=False,
         description="Enable background evaluation and labeling of alert outcomes against ended auction sales",
+    )
+    ENABLE_SURVIVAL_AUDITING: bool = Field(
+        default=False,
+        description="Enable survival auditing of active listings against database history",
     )
     OUTCOME_HORIZON_HOURS: float = Field(
         default=6.0,

@@ -15,6 +15,7 @@ PROGRESSION_ENCHANTS: set[str] = {
     "cultivating",
     "expertise",
     "hecatomb",
+    "toxophilite",
 }
 
 # High-tier enchants where Tier 7 cannot be combined from lower tiers, but strictly compounds from Tier 6 (2 * T6).

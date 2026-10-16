@@ -78,6 +78,39 @@ class RetentionFitter:
         self.config = config or Settings(DRY_RUN=True)
         self.bazaar_cache = bazaar_cache
         self._cache: dict[str, float] = {}
+        self._negative_cache: set[str] = set()
+        self._snapshot_loaded: bool = False
+
+    def set_cached_rates(self, rates: Optional[dict[str, float]]) -> None:
+        """Populate retention rates from a pre-aggregated MarketTelemetrySnapshot (zero hot-path DB I/O)."""
+        if rates is not None:
+            for k, v in rates.items():
+                clean_k = str(k).strip().upper()
+                self._cache[clean_k] = float(v)
+                self._negative_cache.discard(clean_k)
+        self._snapshot_loaded = True
+
+    def preload_from_db(self) -> int:
+        """Preload all fitted retention parameters from SQLite into in-memory cache."""
+        loaded = 0
+        try:
+            conn = self.db.get_connection()
+            cur = conn.execute(
+                """
+                SELECT category, sample_size, fitted_retention
+                FROM retention_params;
+                """
+            )
+            for row in cur.fetchall():
+                cat = str(row[0]).strip().upper()
+                if int(row[1]) >= self.min_samples:
+                    self._cache[cat] = float(row[2])
+                    self._negative_cache.discard(cat)
+                    loaded += 1
+            self._snapshot_loaded = True
+        except Exception as err:
+            logger.debug("Failed preloading retention_params from DB: %s", err)
+        return loaded
 
     @property
     def tau(self) -> float:
@@ -136,6 +169,7 @@ class RetentionFitter:
             updated_at=ts,
         )
         self._cache[clean_id] = fitted
+        self._negative_cache.discard(clean_id)
         logger.info(
             "Fitted Empirical Bayes retention for %s (n=%d, mean=%.3f, prior=%.2f -> fitted=%.3f)",
             clean_id,
@@ -161,12 +195,16 @@ class RetentionFitter:
         if clean_id in self._cache:
             return self._cache[clean_id]
 
+        if self._snapshot_loaded or clean_id in self._negative_cache:
+            return prior
+
         row = self.db.get_retention_params(clean_id)
         if row and int(row.get("sample_size", 0)) >= self.min_samples:
             rate = float(row["fitted_retention"])
             self._cache[clean_id] = rate
             return rate
 
+        self._negative_cache.add(clean_id)
         return prior
 
     def fit_from_sales_history(

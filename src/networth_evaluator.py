@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Any, Optional
 
 from src.bazaar import MASTER_STAR_PRODUCT_IDS, BazaarCache
+from src.constants.prestige import is_crimson_isle_item
 from src.constants.reforge_stones import REFORGE_STONE_DISPLAY_NAMES, REFORGE_STONE_MAP
 from src.constants.star_costs import get_star_essence_cost
 from src.enchant_evaluator import get_enchant_bazaar_cost
@@ -102,10 +103,14 @@ def calculate_item_addons(
                 }
             )
 
-    # 2. Master Stars (Stars 6 through 10 -> 1 to 5 Master Stars)
+    # 2. Master Stars (Stars 6 through 10 -> 1 to 5 Master Stars on Dungeon items only)
     total_stars = int(decoded_data.get("dungeon_stars", 0))
     master_stars = int(decoded_data.get("master_stars", 0))
-    if master_stars == 0 and total_stars > 5:
+
+    # Crimson Isle items (Kuudra gear, crimson rods, etc.) never have Master Stars
+    if is_crimson_isle_item(internal_id):
+        master_stars = 0
+    elif master_stars == 0 and total_stars > 5:
         master_stars = max(0, min(total_stars - 5, 5))
 
     if master_stars > 0:
@@ -198,8 +203,11 @@ def calculate_item_addons(
                 }
             )
 
-    # 6. Essence Stars (1-5)
-    essence_stars = min(total_stars, 5)
+    # 6. Essence Stars (1-10 for Crimson Isle items, 1-5 for Dungeon items)
+    if is_crimson_isle_item(internal_id):
+        essence_stars = min(total_stars, 10)
+    else:
+        essence_stars = min(total_stars, 5)
     if essence_stars > 0:
         essence_type, essence_count = get_star_essence_cost(internal_id, essence_stars)
         if essence_type and essence_count > 0:
@@ -339,5 +347,34 @@ def calculate_item_networth(
         retention_rate = float(override_retention_rate)
     else:
         retention_rate = get_dynamic_retention_rate(base_lbin)
-    resell_baseline = base_lbin + int(round(total_addon_cost * retention_rate))
+
+    recomb_cost = sum(a["cost"] for a in addon_breakdown if a.get("type") == "recomb")
+    other_addon_cost = total_addon_cost - recomb_cost
+
+    # If base item value is below 1M, recombobulator adds 0 resale retention (auto-recomb dungeon drops/junk)
+    if base_lbin < 1_000_000:
+        retained_recomb = 0
+    else:
+        retained_recomb = int(round(recomb_cost * retention_rate))
+
+    retained_other = int(round(other_addon_cost * retention_rate))
+    total_retained_addons = retained_recomb + retained_other
+
+    # For budget items (< 20M), cap total retained addon value at 2.0x base_lbin to prevent
+    # low-tier junk from being inflated into multi-million coin targets
+    if base_lbin < 20_000_000 and total_retained_addons > int(2.0 * base_lbin):
+        total_retained_addons = int(2.0 * base_lbin)
+
+    from src.constants.archetypes import calculate_coherence_multiplier
+
+    coherence_mult, _ = calculate_coherence_multiplier(
+        internal_id=decoded_data.get("internal_id", ""),
+        base_lbin=base_lbin,
+        decoded_data=decoded_data,
+        addon_breakdown=addon_breakdown,
+    )
+    if coherence_mult != 1.0:
+        total_retained_addons = int(round(total_retained_addons * coherence_mult))
+
+    resell_baseline = base_lbin + total_retained_addons
     return addon_breakdown, total_addon_cost, intrinsic_worth, retention_rate, resell_baseline

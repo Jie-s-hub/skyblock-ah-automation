@@ -263,7 +263,12 @@ def test_florid_regression_clean_item_not_priced_off_starred_or_old_listings():
     Cause: 11 live 1.59M listings were >12h old and dropped, and Path A used a 5-star 3M listing
     as the reference. Expected: no flip (real clean floor is ~1.59M, a supply dump).
     """
-    config = get_settings(DRY_RUN=True, MIN_SAMPLE_SIZE=3, MAX_TARGET_TO_BUY_RATIO=3.0)
+    config = get_settings(
+        DRY_RUN=True,
+        MIN_SAMPLE_SIZE=3,
+        MAX_TARGET_TO_BUY_RATIO=3.0,
+        MAX_SNIPE_LISTING_AGE_SECONDS=0,
+    )
     evaluator = FlipEvaluator(config)
     now_ms = 1_000_000_000_000
     hour_ms = 3_600_000

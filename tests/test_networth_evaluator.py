@@ -318,3 +318,150 @@ def test_path_b_fallback_when_bazaar_cache_none(base_settings: Settings):
     assert flip is not None
     assert flip.is_networth_snipe is False
     assert flip.target_resell_price == 20_000_000
+
+
+def test_cheap_item_recomb_retention_zero(mock_bazaar: BazaarCache):
+    """Verify that items with base_lbin < 5M do not retain value from Recombobulator 3000."""
+    from src.networth_evaluator import calculate_item_networth
+
+    decoded = {
+        "internal_id": "CRYPT_DREADLORD_SWORD",
+        "rarity_upgrades": 1,
+    }
+    # Base LBIN = 20,000 (well under 5M)
+    addons, total_addon_cost, intrinsic, retention, resell = calculate_item_networth(
+        base_lbin=20_000,
+        decoded_data=decoded,
+        bazaar_cache=mock_bazaar,
+    )
+    # Raw recomb cost is recorded in breakdown
+    assert total_addon_cost == 10_000_000
+    # But resell baseline must NOT include recomb value
+    assert resell == 20_000
+
+
+def test_budget_item_addon_cap(mock_bazaar: BazaarCache):
+    """Verify that budget items (< 20M) have retained addon value capped at 2.0x base_lbin."""
+    from src.networth_evaluator import calculate_item_networth
+
+    decoded = {
+        "internal_id": "BUDGET_SWORD",
+        "enchantments": {"sharpness": 7},  # Sharpness 7 = 12,000,000 in mock_bazaar
+    }
+    # Base LBIN = 1,000,000 -> 2.0x cap = 2,000,000 max retained addons
+    addons, total_addon_cost, intrinsic, retention, resell = calculate_item_networth(
+        base_lbin=1_000_000,
+        decoded_data=decoded,
+        bazaar_cache=mock_bazaar,
+    )
+    assert total_addon_cost == 12_000_000
+    # Normally 12M * 0.50 = 6M, but capped at 2.0x base (2M) -> resell = 1M + 2M = 3M
+    assert resell == 3_000_000
+
+
+def test_listing_age_gate_rejects_stale_auctions(base_settings: Settings):
+    """Verify listings older than MAX_SNIPE_LISTING_AGE_SECONDS are rejected as stale."""
+    base_settings.MAX_SNIPE_LISTING_AGE_SECONDS = 300
+    evaluator = FlipEvaluator(base_settings)
+    evaluator.set_price_cache({"SUPER_CLEAVER": [1_000_000, 3_000_000, 3_500_000]})
+
+    now_ms = 1_000_000_000_000
+    # Listed 600 seconds ago (exceeds 300s limit)
+    stale_auction = {
+        "uuid": "stale-auction-uuid",
+        "starting_bid": 1_000_000,
+        "item_name": "Super Cleaver",
+        "start": now_ms - 600_000,
+    }
+    decoded = {
+        "internal_id": "SUPER_CLEAVER",
+        "item_name": "Super Cleaver",
+    }
+
+    decision = evaluator.evaluate_decision(stale_auction, decoded, now_ms=now_ms)
+    assert decision.accepted is False
+    assert any("listing_too_old" in r for r in decision.reasons)
+
+    # Fresh listing listed 30 seconds ago passes
+    fresh_auction = {
+        "uuid": "fresh-auction-uuid",
+        "starting_bid": 1_000_000,
+        "item_name": "Super Cleaver",
+        "start": now_ms - 30_000,
+    }
+    fresh_decision = evaluator.evaluate_decision(fresh_auction, decoded, now_ms=now_ms)
+    assert fresh_decision.accepted is True
+    assert fresh_decision.flip is not None
+    assert fresh_decision.flip.features_json is not None
+
+
+def test_crimson_isle_armor_stars_never_counted_as_master_stars(mock_bazaar: BazaarCache):
+    """Verify Crimson Isle items with 6-10 stars are valued with Crimson Essence and NEVER master stars."""
+    from src.networth_evaluator import calculate_item_addons
+
+    # Mock Crimson Essence price
+    mock_bazaar.set_mock_prices(
+        {
+            "ESSENCE_CRIMSON": 3_000,
+            "FIRST_MASTER_STAR": 5_000_000,
+            "SECOND_MASTER_STAR": 12_000_000,
+            "THIRD_MASTER_STAR": 25_000_000,
+            "FOURTH_MASTER_STAR": 40_000_000,
+            "FIFTH_MASTER_STAR": 65_000_000,
+        }
+    )
+
+    # 10-star Aurora Chestplate (even if raw dict accidentally had master_stars: 5)
+    aurora_10 = {
+        "internal_id": "AURORA_CHESTPLATE",
+        "dungeon_stars": 10,
+        "master_stars": 5,
+        "rarity_upgrades": 0,
+    }
+    addons, total_addon_cost = calculate_item_addons(aurora_10, mock_bazaar)
+    addon_types = [a["type"] for a in addons]
+
+    assert "master_star" not in addon_types
+    assert "essence" in addon_types
+    essence_addon = next(a for a in addons if a["type"] == "essence")
+    # 10 stars Crimson Essence = 18,450 essence * 3,000 coins = 55,350,000 coins
+    assert essence_addon["cost"] == 18_450 * 3_000
+    assert essence_addon["product_ids"] == ["ESSENCE_CRIMSON"]
+    assert total_addon_cost == 55_350_000  # NOT 147M+ from master stars!
+
+    # 8-star Crimson Boots
+    crimson_8 = {
+        "internal_id": "CRIMSON_BOOTS",
+        "dungeon_stars": 8,
+        "master_stars": 0,
+        "rarity_upgrades": 0,
+    }
+    addons_8, total_8 = calculate_item_addons(crimson_8, mock_bazaar)
+    addon_types_8 = [a["type"] for a in addons_8]
+
+    assert "master_star" not in addon_types_8
+    assert "essence" in addon_types_8
+    essence_addon_8 = next(a for a in addons_8 if a["type"] == "essence")
+    # 8 stars Crimson Essence = 8,950 essence * 3,000 = 26,850,000 coins
+    assert essence_addon_8["cost"] == 8_950 * 3_000
+    assert total_8 == 26_850_000
+
+    # Contrast with Dungeon Item (Necron Chestplate 8 stars = 5 essence + 3 master stars)
+    mock_bazaar.set_mock_prices(
+        {
+            "ESSENCE_WITHER": 4_000,
+            "FIRST_MASTER_STAR": 5_000_000,
+            "SECOND_MASTER_STAR": 12_000_000,
+            "THIRD_MASTER_STAR": 25_000_000,
+        }
+    )
+    necron_8 = {
+        "internal_id": "NECRON_CHESTPLATE",
+        "dungeon_stars": 8,
+        "master_stars": 3,
+        "rarity_upgrades": 0,
+    }
+    addons_necron, total_necron = calculate_item_addons(necron_8, mock_bazaar)
+    addon_types_necron = [a["type"] for a in addons_necron]
+    assert "master_star" in addon_types_necron
+    assert "essence" in addon_types_necron

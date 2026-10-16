@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from src.bazaar import BazaarCache
 from src.config import Settings
+from src.constants.prestige import is_crimson_isle_item
 from src.db import DatabaseManager
 from src.sales_ingestor import generate_features_hash
 
@@ -228,12 +229,25 @@ class CompsEvaluator:
         self.db = db
         self.config = config or Settings(DRY_RUN=True)
         self.bazaar_cache = bazaar_cache
+        self._eval_cache: dict[tuple[Any, ...], Optional[CompsResult]] = {}
+        self._recent_sales_cache: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        self.telemetry_snapshot: Optional[Any] = None
+
+    def set_telemetry_snapshot(self, snapshot: Any) -> None:
+        """Set in-memory telemetry snapshot for zero-IO hot-path comps lookups."""
+        self.telemetry_snapshot = snapshot
+
+    def clear_cache(self) -> None:
+        """Clear in-memory comps valuation cache."""
+        self._eval_cache.clear()
+        self._recent_sales_cache.clear()
 
     def estimate_comps_value(
         self,
         item_features: dict[str, Any],
         now_ms: Optional[float] = None,
         path_b_resell: Optional[int] = None,
+        telemetry_snapshot: Optional[Any] = None,
     ) -> Optional[CompsResult]:
         """
         Estimate item resale value from recent completed auction house sales.
@@ -250,10 +264,86 @@ class CompsEvaluator:
         window_ms = int(window_hours * 3600.0 * 1000.0)
         cutoff_ms = int(current_now - window_ms)
 
+        target_hash = generate_features_hash(item_features)
+        # Bucket by 5-minute intervals (300,000ms) to maximize multi-cycle cache reuse
+        cutoff_bucket = int(cutoff_ms // 300_000)
+        cache_key = (internal_id, target_hash, path_b_resell, cutoff_bucket)
+        if cache_key in self._eval_cache:
+            return self._eval_cache[cache_key]
+
+        # Zero-DB Rule: If telemetry_snapshot is active, resolve comps strictly in RAM
+        snapshot = telemetry_snapshot or getattr(self, "telemetry_snapshot", None)
+        if snapshot is not None:
+            summary = getattr(snapshot, "comps_summary", {}) or {}
+            # Tier 1 strict feature hash match
+            t1_stats = summary.get(target_hash)
+            if t1_stats is not None and t1_stats.comp_count >= min_threshold:
+                spread_ratio = (t1_stats.iqr_spread / t1_stats.median_price) if t1_stats.median_price > 0 else 1.0
+                confidence = min(1.0, t1_stats.comp_count / 5.0) * max(0.1, 1.0 - min(0.6, spread_ratio))
+                quick_sale_price = t1_stats.p25_price or t1_stats.median_price
+                conservative_resell = min(quick_sale_price, t1_stats.median_price)
+                if path_b_resell and path_b_resell > 0 and t1_stats.median_price > 0:
+                    max_div = getattr(self.config, "COMPS_MAX_PATH_B_DIVERGENCE", 0.25)
+                    div_pct = abs(t1_stats.median_price - path_b_resell) / float(path_b_resell)
+                    if div_pct > max_div:
+                        conservative_resell = min(conservative_resell, path_b_resell)
+                res = CompsResult(
+                    tier="TIER_1",
+                    comp_count=t1_stats.comp_count,
+                    median_price=t1_stats.median_price,
+                    iqr_spread=t1_stats.iqr_spread,
+                    confidence_score=round(confidence, 3),
+                    raw_prices=[],
+                    is_divergent=False,
+                    conservative_resell=conservative_resell,
+                    p25_price=t1_stats.p25_price,
+                    p75_price=t1_stats.p75_price,
+                    quick_sale_price=quick_sale_price,
+                )
+                if len(self._eval_cache) >= 10_000:
+                    self._eval_cache.clear()
+                self._eval_cache[cache_key] = res
+                return res
+
+            # Tier 2 relaxed internal_id match
+            t2_stats = summary.get(internal_id)
+            if t2_stats is not None and t2_stats.comp_count >= min_threshold:
+                spread_ratio = (t2_stats.iqr_spread / t2_stats.median_price) if t2_stats.median_price > 0 else 1.0
+                confidence = min(1.0, t2_stats.comp_count / 5.0) * max(0.1, 1.0 - min(0.6, spread_ratio)) * 0.85
+                quick_sale_price = t2_stats.p25_price or t2_stats.median_price
+                conservative_resell = min(quick_sale_price, t2_stats.median_price)
+                if path_b_resell and path_b_resell > 0 and t2_stats.median_price > 0:
+                    max_div = getattr(self.config, "COMPS_MAX_PATH_B_DIVERGENCE", 0.25)
+                    div_pct = abs(t2_stats.median_price - path_b_resell) / float(path_b_resell)
+                    if div_pct > max_div:
+                        conservative_resell = min(conservative_resell, path_b_resell)
+                res = CompsResult(
+                    tier="TIER_2",
+                    comp_count=t2_stats.comp_count,
+                    median_price=t2_stats.median_price,
+                    iqr_spread=t2_stats.iqr_spread,
+                    confidence_score=round(confidence, 3),
+                    raw_prices=[],
+                    is_divergent=False,
+                    conservative_resell=conservative_resell,
+                    p25_price=t2_stats.p25_price,
+                    p75_price=t2_stats.p75_price,
+                    quick_sale_price=quick_sale_price,
+                )
+                if len(self._eval_cache) >= 10_000:
+                    self._eval_cache.clear()
+                self._eval_cache[cache_key] = res
+                return res
+
+            # Missing from snapshot: return None immediately without DB calls
+            if len(self._eval_cache) >= 10_000:
+                self._eval_cache.clear()
+            self._eval_cache[cache_key] = None
+            return None
+
         # -------------------------------------------------------------------
         # Tier 1: Strict Feature Matching
         # -------------------------------------------------------------------
-        target_hash = generate_features_hash(item_features)
         tier1_sales = self.db.get_sales(
             internal_id=internal_id,
             features_hash=target_hash,
@@ -263,46 +353,62 @@ class CompsEvaluator:
         tier1_sales = sanitize_comps(tier1_sales, self.config)
 
         if len(tier1_sales) >= min_threshold:
-            return self._aggregate_sales(
+            res = self._aggregate_sales(
                 tier_label="TIER_1",
                 sales=tier1_sales,
                 current_now=current_now,
                 decay_lambda=decay_lambda,
                 path_b_resell=path_b_resell,
             )
+            if len(self._eval_cache) >= 10_000:
+                self._eval_cache.clear()
+            self._eval_cache[cache_key] = res
+            return res
 
         # -------------------------------------------------------------------
         # Tier 2: Relaxed Feature Matching
         # -------------------------------------------------------------------
-        # Query all recent sales for this internal_id within the sliding window
-        all_recent_sales = self.db.get_sales(
-            internal_id=internal_id,
-            start_time=cutoff_ms,
-            limit=500,
-        )
+        # Query recent sales for this internal_id (memoized per 5-minute bucket)
+        recent_sales_key = (internal_id, cutoff_bucket)
+        if recent_sales_key in self._recent_sales_cache:
+            all_recent_sales = self._recent_sales_cache[recent_sales_key]
+        else:
+            all_recent_sales = self.db.get_sales(
+                internal_id=internal_id,
+                start_time=cutoff_ms,
+                limit=500,
+            )
+            if len(self._recent_sales_cache) >= 2000:
+                self._recent_sales_cache.clear()
+            self._recent_sales_cache[recent_sales_key] = all_recent_sales
 
+        is_crimson = is_crimson_isle_item(internal_id)
         item_recomb = int(item_features.get("rarity_upgrades", 0))
         item_stars = int(item_features.get("dungeon_stars", 0))
-        item_m_stars = int(item_features.get("master_stars", 0))
+        item_m_stars = 0 if is_crimson else int(item_features.get("master_stars", 0))
         item_prestige = str(item_features.get("prestige_tier", "") or "").strip().upper()
 
         relaxed_sales: list[dict[str, Any]] = []
 
         for sale in all_recent_sales:
-            raw_feat = sale.get("features_json")
-            sale_feat: dict[str, Any] = {}
-            if isinstance(raw_feat, str):
-                try:
-                    sale_feat = json.loads(raw_feat)
-                except Exception:
-                    continue
-            elif isinstance(raw_feat, dict):
-                sale_feat = raw_feat
+            sale_feat = sale.get("_parsed_features")
+            if sale_feat is None:
+                raw_feat = sale.get("features_json")
+                if isinstance(raw_feat, str):
+                    try:
+                        sale_feat = json.loads(raw_feat)
+                    except Exception:
+                        sale_feat = {}
+                elif isinstance(raw_feat, dict):
+                    sale_feat = raw_feat
+                else:
+                    sale_feat = {}
+                sale["_parsed_features"] = sale_feat
 
             # Relaxed filter: exact recomb, prestige, and star tier +/- 1
             s_recomb = int(sale_feat.get("rarity_upgrades", 0))
             s_stars = int(sale_feat.get("dungeon_stars", 0))
-            s_m_stars = int(sale_feat.get("master_stars", 0))
+            s_m_stars = 0 if is_crimson else int(sale_feat.get("master_stars", 0))
             s_prestige = str(sale_feat.get("prestige_tier", "") or "").strip().upper()
 
             if s_recomb == item_recomb and s_prestige == item_prestige:
@@ -313,15 +419,22 @@ class CompsEvaluator:
         relaxed_sales = sanitize_comps(relaxed_sales, self.config)
 
         if len(relaxed_sales) >= min_threshold:
-            return self._aggregate_sales(
+            res = self._aggregate_sales(
                 tier_label="TIER_2",
                 sales=relaxed_sales,
                 current_now=current_now,
                 decay_lambda=decay_lambda,
                 path_b_resell=path_b_resell,
             )
+            if len(self._eval_cache) >= 10_000:
+                self._eval_cache.clear()
+            self._eval_cache[cache_key] = res
+            return res
 
         # Tier 3: Threshold not met -> None (fallback to Path A / Path B)
+        if len(self._eval_cache) >= 10_000:
+            self._eval_cache.clear()
+        self._eval_cache[cache_key] = None
         return None
 
     def _aggregate_sales(
@@ -385,7 +498,7 @@ class CompsEvaluator:
                 is_divergent = True
                 # Favor conservative valuation
                 conservative_resell = min(conservative_resell, path_b_resell)
-                logger.info(
+                logger.debug(
                     "Comps valuation divergence detected (%.1f%% > %.1f%%): comps=%d vs path_b=%d -> capped at %d",
                     divergence_pct * 100.0,
                     max_div * 100.0,

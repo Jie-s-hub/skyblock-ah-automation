@@ -6,8 +6,10 @@ import asyncio
 import json
 import logging
 import sqlite3
+import threading
 import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -75,6 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_sales_item_time ON sales_history(internal_id, tim
 CREATE INDEX IF NOT EXISTS idx_sales_buyer_time ON sales_history(buyer_uuid, timestamp);
 CREATE INDEX IF NOT EXISTS idx_sales_seller_time ON sales_history(seller_uuid, timestamp);
 CREATE INDEX IF NOT EXISTS idx_sales_hash ON sales_history(features_hash);
+CREATE INDEX IF NOT EXISTS idx_sales_item_hash_time ON sales_history(internal_id, features_hash, timestamp);
 
 -- 4. Bazaar Rolling Price Snapshots
 CREATE TABLE IF NOT EXISTS bazaar_snapshots (
@@ -138,6 +141,26 @@ CREATE INDEX IF NOT EXISTS idx_outcomes_uuid ON alert_outcomes(auction_uuid);
 """
 
 
+@dataclass
+class CompsStats:
+    median_price: int
+    p25_price: int
+    p75_price: int
+    comp_count: int
+    iqr_spread: int
+
+
+@dataclass
+class MarketTelemetrySnapshot:
+    empirical_sell_times: dict[str, float] = field(default_factory=dict)
+    open_holdings: dict[str, int] = field(default_factory=dict)
+    comps_summary: dict[str, CompsStats] = field(default_factory=dict)
+    pet_sales: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    sales_counts: dict[str, int] = field(default_factory=dict)
+    lane_conversion_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
+    retention_rates: dict[str, float] = field(default_factory=dict)
+
+
 class DatabaseManager:
     """Thread-safe, WAL-enabled SQLite persistence manager."""
 
@@ -146,6 +169,8 @@ class DatabaseManager:
         self._init_dir()
         self._conn: Optional[sqlite3.Connection] = None
         self._lock = asyncio.Lock()
+        self._thread_lock = threading.RLock()
+        self._sales_cache: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
         self.init_db()
 
     def _init_dir(self) -> None:
@@ -162,11 +187,16 @@ class DatabaseManager:
                 timeout=30.0,
             )
             self._conn.row_factory = sqlite3.Row
-            # Enable WAL mode for high concurrency
+            # Enable WAL mode and configure busy timeout for high concurrency
             self._conn.execute("PRAGMA journal_mode = WAL;")
+            self._conn.execute("PRAGMA busy_timeout = 5000;")
             self._conn.execute("PRAGMA synchronous = NORMAL;")
             self._conn.execute("PRAGMA foreign_keys = ON;")
         return self._conn
+
+    def get_connection(self) -> sqlite3.Connection:
+        """Return open SQLite connection."""
+        return self._get_connection()
 
     def init_db(self) -> None:
         """Create tables and indexes if they do not already exist."""
@@ -284,31 +314,32 @@ class DatabaseManager:
             derpy_active, fee_model_version, trace_json, listing_start
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        try:
-            with conn:
-                cur = conn.execute(
-                    query,
-                    (
-                        auction_uuid,
-                        ts,
-                        internal_id,
-                        int(buy_price),
-                        int(resell_val),
-                        int(profit_val),
-                        float(margin_pct),
-                        confidence_label,
-                        valuation_path,
-                        feat_str,
-                        int(derpy_active),
-                        int(fee_model_version),
-                        trace_str,
-                        listing_start,
-                    ),
-                )
-                return cur.rowcount > 0
-        except Exception as e:
-            logger.error("Failed to log alert %s: %s", auction_uuid, e)
-            return False
+        with self._thread_lock:
+            try:
+                with conn:
+                    cur = conn.execute(
+                        query,
+                        (
+                            auction_uuid,
+                            ts,
+                            internal_id,
+                            int(buy_price),
+                            int(resell_val),
+                            int(profit_val),
+                            float(margin_pct),
+                            confidence_label,
+                            valuation_path,
+                            feat_str,
+                            int(derpy_active),
+                            int(fee_model_version),
+                            trace_str,
+                            listing_start,
+                        ),
+                    )
+                    return cur.rowcount > 0
+            except Exception as e:
+                logger.error("Failed to log alert %s: %s", auction_uuid, e)
+                return False
 
     async def async_log_alert(self, **kwargs: Any) -> bool:
         """Async wrapper for log_alert."""
@@ -678,13 +709,89 @@ class DatabaseManager:
                         time_to_sell_s,
                     ),
                 )
-                return cur.rowcount > 0
+                if cur.rowcount > 0:
+                    with self._thread_lock:
+                        u_id = internal_id.strip().upper()
+                        keys_to_del = [k for k in self._sales_cache if k[0] == u_id]
+                        for k in keys_to_del:
+                            del self._sales_cache[k]
+                    return True
+                return False
         except Exception as e:
             logger.error("Failed to record sale %s: %s", uuid, e)
             return False
 
+    def record_sales_batch(self, sales: list[dict[str, Any]]) -> int:
+        """
+        Bulk insert multiple completed auction sales into sales_history in a single atomic transaction.
+        Significantly reduces disk I/O and transaction locking overhead.
+        """
+        if not sales:
+            return 0
+        conn = self._get_connection()
+        query = """
+        INSERT OR IGNORE INTO sales_history (
+            uuid, internal_id, price, buyer_uuid, seller_uuid,
+            timestamp, features_json, features_hash, normalized_tier, time_to_sell_s
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        rows = []
+        for s in sales:
+            uuid = str(s.get("uuid", ""))
+            if not uuid:
+                continue
+            timestamp = int(s.get("timestamp", 0))
+            time_to_sell_s = s.get("time_to_sell_s")
+            if time_to_sell_s is None and uuid:
+                live_start = self.get_live_listing_start(uuid)
+                if live_start is not None and live_start > 0:
+                    time_to_sell_s = max(0.0, (int(timestamp) - live_start) / 1000.0)
+
+            features_json = s.get("features_json")
+            feat_str = (
+                features_json if isinstance(features_json, str)
+                else json.dumps(features_json or {}, separators=(",", ":"))
+            )
+            rows.append((
+                uuid,
+                str(s.get("internal_id", "")),
+                int(s.get("price", 0)),
+                s.get("buyer_uuid"),
+                s.get("seller_uuid"),
+                timestamp,
+                feat_str,
+                str(s.get("features_hash", "")),
+                int(s.get("normalized_tier", 0)),
+                time_to_sell_s,
+            ))
+
+        if not rows:
+            return 0
+
+        with self._thread_lock:
+            try:
+                with conn:
+                    cur = conn.executemany(query, rows)
+                    if cur.rowcount > 0:
+                        updated_ids = {str(s.get("internal_id", "")).strip().upper() for s in sales if s.get("internal_id")}
+                        keys_to_del = [k for k in self._sales_cache if k[0] in updated_ids]
+                        for k in keys_to_del:
+                            del self._sales_cache[k]
+                    return cur.rowcount
+            except Exception as e:
+                logger.error("Failed to bulk record sales batch: %s", e)
+                return 0
+
+    async def async_record_sales_batch(self, sales: list[dict[str, Any]]) -> int:
+        return await asyncio.to_thread(self.record_sales_batch, sales)
+
     async def async_record_sale(self, **kwargs: Any) -> bool:
         return await asyncio.to_thread(self.record_sale, **kwargs)
+
+    def clear_sales_cache(self) -> None:
+        """Explicitly clear the in-memory sales query cache."""
+        with self._thread_lock:
+            self._sales_cache.clear()
 
     def get_sale(self, uuid: str) -> Optional[dict[str, Any]]:
         """Retrieve completed sale by auction UUID."""
@@ -704,6 +811,12 @@ class DatabaseManager:
         limit: int = 500,
     ) -> list[dict[str, Any]]:
         """Retrieve completed sales by internal ID or feature hash."""
+        cache_key = (internal_id, features_hash, start_time, end_time, limit)
+        with self._thread_lock:
+            cached = self._sales_cache.get(cache_key)
+            if cached is not None:
+                return [dict(x) for x in cached]
+
         conn = self._get_connection()
         clauses = []
         params: list[Any] = []
@@ -726,7 +839,12 @@ class DatabaseManager:
         params.append(limit)
 
         cur = conn.execute(query, tuple(params))
-        return [dict(r) for r in cur.fetchall()]
+        res = [dict(r) for r in cur.fetchall()]
+        with self._thread_lock:
+            if len(self._sales_cache) >= 10_000:
+                self._sales_cache.clear()
+            self._sales_cache[cache_key] = res
+        return [dict(x) for x in res]
 
     def get_empirical_median_time_to_sell(
         self,
@@ -938,20 +1056,23 @@ class DatabaseManager:
     # -----------------------------------------------------------------------
 
     def record_live_listings(self, listings: list[tuple[str, int]]) -> int:
-        """Batch insert live listings with their start timestamps."""
+        """Batch insert live listings with their start timestamps and prune stale entries."""
         if not listings:
             return 0
         conn = self._get_connection()
-        try:
-            with conn:
-                cur = conn.executemany(
-                    "INSERT OR IGNORE INTO live_listings (uuid, start_time) VALUES (?, ?);",
-                    listings,
-                )
-                return cur.rowcount
-        except Exception as e:
-            logger.error("Failed to record live listings: %s", e)
-            return 0
+        with self._thread_lock:
+            try:
+                with conn:
+                    cur = conn.executemany(
+                        "INSERT OR IGNORE INTO live_listings (uuid, start_time) VALUES (?, ?);",
+                        listings,
+                    )
+                    cutoff_ms = int(time.time() * 1000.0 - 48 * 3600.0 * 1000.0)
+                    conn.execute("DELETE FROM live_listings WHERE start_time < ?;", (cutoff_ms,))
+                    return cur.rowcount
+            except Exception as e:
+                logger.error("Failed to record live listings: %s", e)
+                return 0
 
     def get_live_listing_start(self, uuid: str) -> Optional[int]:
         """Get the start timestamp (ms) for a live listing uuid."""
@@ -1066,6 +1187,147 @@ class DatabaseManager:
         params.append(limit)
         cur = conn.execute(query, tuple(params))
         return [dict(r) for r in cur.fetchall()]
+
+    def build_telemetry_snapshot(self) -> MarketTelemetrySnapshot:
+        """
+        Pre-aggregates empirical time-to-sell, open portfolio holdings, and comps statistics
+        into an immutable in-memory snapshot for zero hot-path database I/O.
+        """
+        conn = self._get_connection()
+        sell_times: dict[str, float] = {}
+        try:
+            cur = conn.execute(
+                """
+                SELECT internal_id, features_hash, time_to_sell_s
+                FROM sales_history
+                WHERE time_to_sell_s IS NOT NULL AND time_to_sell_s > 0
+                ORDER BY timestamp DESC
+                LIMIT 5000;
+                """
+            )
+            times_by_id: dict[str, list[float]] = defaultdict(list)
+            times_by_hash: dict[str, list[float]] = defaultdict(list)
+            for row in cur.fetchall():
+                iid = str(row[0]).strip().upper()
+                f_hash = str(row[1] or "")
+                tts = float(row[2])
+                times_by_id[iid].append(tts)
+                if f_hash:
+                    times_by_hash[f"{iid}:{f_hash}"].append(tts)
+
+            for iid, t_list in times_by_id.items():
+                if len(t_list) >= 10:
+                    t_list.sort()
+                    mid = len(t_list) // 2
+                    sell_times[iid] = t_list[mid] if len(t_list) % 2 == 1 else (t_list[mid - 1] + t_list[mid]) / 2.0
+
+            for key, t_list in times_by_hash.items():
+                if len(t_list) >= 10:
+                    t_list.sort()
+                    mid = len(t_list) // 2
+                    sell_times[key] = t_list[mid] if len(t_list) % 2 == 1 else (t_list[mid - 1] + t_list[mid]) / 2.0
+        except Exception as e:
+            logger.debug("Failed building empirical sell times: %s", e)
+
+        holdings: dict[str, int] = defaultdict(int)
+        try:
+            cur = conn.execute(
+                """
+                SELECT internal_id, COUNT(*) as cnt
+                FROM purchases
+                WHERE status IN ('HELD', 'BOUGHT', 'OPEN')
+                GROUP BY internal_id;
+                """
+            )
+            for row in cur.fetchall():
+                holdings[str(row[0]).strip().upper()] = int(row[1])
+        except Exception as e:
+            logger.debug("Failed querying open holdings: %s", e)
+
+        comps: dict[str, CompsStats] = {}
+        try:
+            cur = conn.execute(
+                """
+                SELECT internal_id, features_hash, comp_count, median_price, iqr_spread
+                FROM comps_cache;
+                """
+            )
+            for row in cur.fetchall():
+                iid = str(row[0]).strip().upper()
+                f_hash = str(row[1] or "")
+                c_cnt = int(row[2])
+                med_p = int(row[3])
+                iqr = int(row[4])
+                stats = CompsStats(
+                    median_price=med_p,
+                    p25_price=max(0, med_p - iqr // 2),
+                    p75_price=med_p + iqr // 2,
+                    comp_count=c_cnt,
+                    iqr_spread=iqr,
+                )
+                if f_hash:
+                    comps[f_hash] = stats
+                comps[iid] = stats
+        except Exception as e:
+            logger.debug("Failed querying comps_cache: %s", e)
+
+        pet_sales: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        sales_counts: dict[str, int] = defaultdict(int)
+        try:
+            now_ms = int(time.time() * 1000)
+            window_48h_ms = now_ms - (48 * 3600 * 1000)
+            cur = conn.execute(
+                """
+                SELECT internal_id, price, timestamp, features_json
+                FROM sales_history
+                WHERE timestamp >= ?
+                ORDER BY timestamp DESC;
+                """,
+                (window_48h_ms,),
+            )
+            for row in cur.fetchall():
+                iid = str(row[0]).strip().upper()
+                sales_counts[iid] += 1
+                if iid.startswith("PET_"):
+                    pet_sales[iid].append({
+                        "internal_id": iid,
+                        "price": int(row[1]),
+                        "timestamp": int(row[2]),
+                        "features_json": row[3],
+                    })
+        except Exception as e:
+            logger.debug("Failed querying pet sales & sales counts for snapshot: %s", e)
+
+        lane_stats: dict[str, dict[str, Any]] = {}
+        try:
+            lane_stats = self.get_lane_conversion_stats()
+        except Exception as e:
+            logger.debug("Failed querying lane conversion stats for snapshot: %s", e)
+
+        retention_rates: dict[str, float] = {}
+        try:
+            cur = conn.execute(
+                """
+                SELECT category, sample_size, fitted_retention
+                FROM retention_params;
+                """
+            )
+            for row in cur.fetchall():
+                cat = str(row[0]).strip().upper()
+                if int(row[1]) >= 3:
+                    retention_rates[cat] = float(row[2])
+        except Exception as e:
+            logger.debug("Failed querying retention_params for snapshot: %s", e)
+
+        return MarketTelemetrySnapshot(
+            empirical_sell_times=sell_times,
+            open_holdings=dict(holdings),
+            comps_summary=comps,
+            pet_sales=dict(pet_sales),
+            sales_counts=dict(sales_counts),
+            lane_conversion_stats=lane_stats,
+            retention_rates=retention_rates,
+        )
 
 
 # Module-level default singleton instance

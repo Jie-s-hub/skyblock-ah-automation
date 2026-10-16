@@ -45,27 +45,33 @@ public class AhSniperClient implements ClientModInitializer {
     public void onInitializeClient() {
         LOGGER.info("[AH Sniper] Initializing Fabric Client Mod...");
 
-        // Register Keybind 'K'
+        // Register keybindings
+        ModKeybindings.register();
+
         keyOpenGui = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.ah_sniper.open",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_K,
-                KeyMapping.Category.MISC
+                ModKeybindings.CATEGORY
         ));
 
         // Connect to local WebSocket bridge
         initWebSocketConnection();
 
-        // Register client tick event to open FlipScreen on keybind press
+        // Register client tick event to open FlipScreen and toggle Auto-Inspect on keybind press
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (keyOpenGui.consumeClick()) {
                 if (client.player != null) {
                     client.setScreen(new FlipScreen());
                 }
             }
+
+            while (ModKeybindings.toggleAutoInspectKey.consumeClick()) {
+                AutoInspectManager.toggle(client);
+            }
         });
 
-        LOGGER.info("[AH Sniper] Successfully initialized. Keybind [K] registered.");
+        LOGGER.info("[AH Sniper] Successfully initialized. Keybinds [K] and [;] registered under Hypixel AH Sniper.");
     }
 
     public static synchronized void initWebSocketConnection() {
@@ -151,6 +157,9 @@ public class AhSniperClient implements ClientModInitializer {
             while (ACTIVE_FLIPS.size() > MAX_SLIDING_WINDOW_SIZE) {
                 ACTIVE_FLIPS.remove(ACTIVE_FLIPS.size() - 1);
             }
+
+            // Forward to WebSocketClientHandler for Auto-Inspect evaluation
+            WebSocketClientHandler.onMessage(jsonPayload);
         } catch (Exception err) {
             LOGGER.error("[AH Sniper] Failed to parse incoming flip payload: {}", err.getMessage());
         }

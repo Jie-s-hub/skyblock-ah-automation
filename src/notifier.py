@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -515,10 +517,11 @@ class DiscordNotifier:
 
         Includes rate-limit throttling and Discord 429 backoff handling.
         """
-        # Broadcast to connected in-game Fabric client mods
-        if self.ws_broadcaster and getattr(self.config, "ENABLE_LOCAL_WS", True):
+        # Broadcast to connected in-game Fabric client mods (if not already broadcast with zero latency)
+        if self.ws_broadcaster and getattr(self.config, "ENABLE_LOCAL_WS", True) and not getattr(flip, "ws_broadcasted", False):
             try:
                 await self.ws_broadcaster.broadcast_flip(flip)
+                flip.ws_broadcasted = True
             except Exception as err:
                 logger.warning("Failed to broadcast flip to local WebSocket: %s", err)
 
@@ -780,6 +783,216 @@ class DiscordNotifier:
                     return False
             except Exception as err:
                 logger.error("Error dispatching Discord trade webhook for %s: %s", trade.auction_uuid, err)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1.0)
+                    continue
+                return False
+
+        return False
+
+    # Alias for trade alert to match main.py invocation
+    send_completed_trade = send_completed_trade_alert
+
+    def build_profile_tracker_embed(
+        self,
+        metrics: dict[str, Any],
+        open_positions: Optional[list[dict[str, Any]]] = None,
+        recent_trades: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        """Build Discord webhook embed visualizing player profile AH performance & portfolio."""
+        player_ign = metrics.get("player_ign", "ongvvkk")
+        player_uuid = metrics.get("player_uuid", "Unresolved")
+        total_trades = metrics.get("total_trades", 0)
+        win_rate = metrics.get("win_rate_pct", 0.0)
+        daily_pnl = metrics.get("realized_pnl_daily", 0)
+        weekly_pnl = metrics.get("realized_pnl_weekly", 0)
+        all_time_pnl = metrics.get("realized_pnl_all_time", 0)
+        avg_profit = metrics.get("avg_profit_per_trade", 0)
+        avg_hold_sec = metrics.get("avg_hold_duration_sec", 0.0)
+        held_count = metrics.get("held_items_count", 0)
+        unrealized_cap = metrics.get("unrealized_capital_deployed", 0)
+
+        # Color: Green if positive all-time, Red if negative, Gold if neutral
+        if all_time_pnl > 0:
+            color = 0x2ECC71  # Emerald green
+        elif all_time_pnl < 0:
+            color = 0xE74C3C  # Coral red
+        else:
+            color = 0xF1C40F  # Gold
+
+        # Format durations
+        def _fmt_dur(seconds: float) -> str:
+            if seconds < 0:
+                return "0s"
+            m, s = divmod(int(seconds), 60)
+            h, m = divmod(m, 60)
+            d, h = divmod(h, 24)
+            if d > 0:
+                return f"{d}d {h}h"
+            if h > 0:
+                return f"{h}h {m}m"
+            if m > 0:
+                return f"{m}m"
+            return f"{s}s"
+
+        uuid_display = f"`{player_uuid[:18]}...`" if len(player_uuid) > 18 else f"`{player_uuid}`"
+
+        fields: list[dict[str, Any]] = [
+            {
+                "name": "👤 Tracked Profile",
+                "value": f"**IGN:** `{player_ign}`\n**UUID:** {uuid_display}",
+                "inline": True,
+            },
+            {
+                "name": "💼 Active Portfolio",
+                "value": f"**{held_count}** positions held\n**{unrealized_cap:,}** coins locked",
+                "inline": True,
+            },
+            {
+                "name": "📈 Win Rate & Velocity",
+                "value": f"**{win_rate:.1f}%** win rate\nAvg Hold: **{_fmt_dur(avg_hold_sec)}**",
+                "inline": True,
+            },
+            {
+                "name": "💰 Realized Net Profit (After Taxes)",
+                "value": (
+                    f"```diff\n"
+                    f"{'+' if daily_pnl >= 0 else ''}{daily_pnl:,} coins (24h Daily)\n"
+                    f"{'+' if weekly_pnl >= 0 else ''}{weekly_pnl:,} coins (7d Weekly)\n"
+                    f"{'+' if all_time_pnl >= 0 else ''}{all_time_pnl:,} coins (All-Time)\n"
+                    f"{'+' if avg_profit >= 0 else ''}{avg_profit:,} coins (Avg / Flip)\n"
+                    f"```"
+                ),
+                "inline": False,
+            },
+        ]
+
+        # Active holdings breakdown
+        if open_positions:
+            now_ms = int(time.time() * 1000)
+            holding_lines = []
+            for pos in open_positions[:5]:
+                name = pos.get("internal_id", "UNKNOWN")
+                if pos.get("features_json"):
+                    try:
+                        feat = json.loads(pos["features_json"]) if isinstance(pos["features_json"], str) else pos["features_json"]
+                        name = feat.get("item_name") or feat.get("internal_id") or name
+                    except Exception:
+                        pass
+                price = int(pos.get("buy_price", 0))
+                buy_ts = int(pos.get("buy_timestamp", now_ms))
+                age_s = max(0.0, (now_ms - buy_ts) / 1000.0)
+                holding_lines.append(f"• **{name}** — `{price:,}` coins ({_fmt_dur(age_s)} ago)")
+            if len(open_positions) > 5:
+                holding_lines.append(f"*...and {len(open_positions) - 5} more positions*")
+            fields.append({
+                "name": f"📦 Open Positions ({len(open_positions)} total)",
+                "value": "\n".join(holding_lines),
+                "inline": False,
+            })
+
+        # Recent closed flips breakdown
+        if recent_trades:
+            trade_lines = []
+            for tr in recent_trades[:5]:
+                name = tr.get("internal_id", "UNKNOWN")
+                if tr.get("features_json"):
+                    try:
+                        feat = json.loads(tr["features_json"]) if isinstance(tr["features_json"], str) else tr["features_json"]
+                        name = feat.get("item_name") or feat.get("internal_id") or name
+                    except Exception:
+                        pass
+                pnl = int(tr.get("net_realized_pnl", 0))
+                buy_p = int(tr.get("buy_price", 0))
+                roi = (pnl / buy_p * 100.0) if buy_p > 0 else 0.0
+                pnl_sign = "+" if pnl >= 0 else ""
+                buy_ts = int(tr.get("buy_timestamp", 0))
+                sell_ts = int(tr.get("realized_sell_timestamp", buy_ts))
+                dur_s = max(0.0, (sell_ts - buy_ts) / 1000.0)
+                trade_lines.append(
+                    f"• **{name}** — **{pnl_sign}{pnl:,}** coins ({roi:+.1f}%) [{_fmt_dur(dur_s)}]"
+                )
+            if len(recent_trades) > 5:
+                trade_lines.append(f"*...and {len(recent_trades) - 5} more trades*")
+            fields.append({
+                "name": f"🏆 Recent Closed Flips ({total_trades} total)",
+                "value": "\n".join(trade_lines),
+                "inline": False,
+            })
+
+        embed = {
+            "title": f"📊 [AH TRACKER] Profile & Portfolio: {player_ign}",
+            "color": color,
+            "fields": fields,
+            "footer": {
+                "text": f"Hypixel SkyBlock AH Arbitrage • Profile Tracker • IGN: {player_ign}",
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        return {"embeds": [embed]}
+
+    async def send_profile_tracker_report(
+        self,
+        metrics: dict[str, Any],
+        open_positions: Optional[list[dict[str, Any]]] = None,
+        recent_trades: Optional[list[dict[str, Any]]] = None,
+        max_retries: int = 3,
+    ) -> bool:
+        """Dispatch profile AH tracker performance report to Discord webhook or console if dry-run."""
+        player_ign = metrics.get("player_ign", "ongvvkk")
+        daily_pnl = metrics.get("realized_pnl_daily", 0)
+        all_time_pnl = metrics.get("realized_pnl_all_time", 0)
+        win_rate = metrics.get("win_rate_pct", 0.0)
+        total_trades = metrics.get("total_trades", 0)
+        held_count = metrics.get("held_items_count", 0)
+        unrealized_cap = metrics.get("unrealized_capital_deployed", 0)
+
+        if self.config.DRY_RUN:
+            msg = (
+                f"\n📊 [DRY RUN AH TRACKER REPORT] Profile: {player_ign}\n"
+                f"  Total Trades:       {total_trades}\n"
+                f"  Win Rate:           {win_rate:.1f}%\n"
+                f"  Realized PnL (24h): {'+' if daily_pnl >= 0 else ''}{daily_pnl:,} coins\n"
+                f"  Realized All-Time:  {'+' if all_time_pnl >= 0 else ''}{all_time_pnl:,} coins\n"
+                f"  Open Positions:     {held_count} ({unrealized_cap:,} coins capital)\n"
+            )
+            logger.info("%s", msg)
+            try:
+                sys.stdout.write(msg + "\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
+            return True
+
+        target_webhook = self.config.DISCORD_WEBHOOK_URL
+        if not target_webhook or "dummy" in target_webhook:
+            logger.warning("Discord webhook URL is empty or dummy. Skipping profile tracker dispatch for %s", player_ign)
+            return False
+
+        session = await self.get_session()
+        payload = self.build_profile_tracker_embed(metrics, open_positions=open_positions, recent_trades=recent_trades)
+
+        for attempt in range(max_retries):
+            try:
+                async with session.post(target_webhook, json=payload) as resp:
+                    if resp.status in (200, 204):
+                        logger.info("Successfully dispatched Discord profile tracker report for %s", player_ign)
+                        await asyncio.sleep(0.5)
+                        return True
+                    if resp.status == 429:
+                        try:
+                            data = await resp.json()
+                            retry_after = float(data.get("retry_after", 1.0))
+                        except Exception:
+                            retry_after = 2.0
+                        logger.warning("Discord webhook rate limited (429). Retrying after %.2fs...", retry_after)
+                        await asyncio.sleep(retry_after)
+                        continue
+                    text = await resp.text()
+                    logger.error("Discord profile tracker webhook failed with HTTP %d: %s", resp.status, text[:200])
+                    return False
+            except Exception as err:
+                logger.error("Error dispatching Discord profile tracker webhook for %s: %s", player_ign, err)
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1.0)
                     continue

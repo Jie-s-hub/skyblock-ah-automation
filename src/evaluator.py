@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from src.addon_rules import calculate_pet_candy_penalty, is_permanently_blacklisted, is_vanity_item
 from src.bazaar import BazaarCache
 from src.config import Settings
 from src.constants.attributes import (
@@ -34,7 +35,11 @@ from src.constants.pet_levels import (
 )
 from src.constants.recipes import get_base_item_id, get_recipe
 from src.constants.reforge_stones import REFORGE_STONE_MAP
+from src.constants.taxes import best_resale_net, net_revenue, optimize_target_resell
 from src.craft_evaluator import calculate_craft_cost
+from src.enchant_evaluator import get_enchant_bazaar_cost
+from src.networth_evaluator import calculate_item_networth
+from src.ranking import score_and_rank_flip
 from src.velocity import SalesVelocityTracker
 
 logger = logging.getLogger(__name__)
@@ -60,6 +65,7 @@ class FlipResult(BaseModel):
     """Structured data container representing a validated arbitrage opportunity."""
 
     auction_uuid: str
+    item_instance_uuid: Optional[str] = None
     internal_id: str
     item_name: str
     buy_price: int
@@ -148,6 +154,13 @@ class FlipResult(BaseModel):
 
     # Phase 4 Start Timestamp Persistence
     listing_start: Optional[int] = None
+    features_json: Optional[str] = None
+    ws_broadcasted: bool = False
+
+    # Phase 4 Quantitative Capital Velocity & Sybil Defense
+    capital_velocity_score: Optional[float] = None
+    portfolio_concentration_warning: Optional[str] = None
+    sybil_flag: Optional[str] = None
 
 
 class Decision(BaseModel):
@@ -243,6 +256,50 @@ PROGRESSION_STAPLES: dict[str, str] = {
 }
 
 
+class ListingRecord:
+    """Lightweight in-memory descriptor for fast O(1) indexed pruning and zero-copy updates."""
+
+    __slots__ = (
+        "uuid",
+        "cache_id",
+        "price",
+        "start_ms",
+        "seller",
+        "prof_id",
+        "coop_members",
+        "is_upgraded",
+        "is_pet",
+        "pet_bucket_key",
+        "pet_record",
+    )
+
+    def __init__(
+        self,
+        uuid: str,
+        cache_id: str,
+        price: int,
+        start_ms: Optional[int],
+        seller: str,
+        prof_id: str,
+        coop_members: frozenset[str],
+        is_upgraded: bool,
+        is_pet: bool,
+        pet_bucket_key: Optional[tuple],
+        pet_record: Optional[dict[str, Any]],
+    ) -> None:
+        self.uuid = uuid
+        self.cache_id = cache_id
+        self.price = price
+        self.start_ms = start_ms
+        self.seller = seller
+        self.prof_id = prof_id
+        self.coop_members = coop_members
+        self.is_upgraded = is_upgraded
+        self.is_pet = is_pet
+        self.pet_bucket_key = pet_bucket_key
+        self.pet_record = pet_record
+
+
 class FlipEvaluator:
     """Evaluates active SkyBlock BIN listings against market baselines for flips."""
 
@@ -266,15 +323,38 @@ class FlipEvaluator:
         self._price_cache: dict[str, list[int]] = {}
         self._clean_price_cache: dict[str, list[int]] = {}
         self._seller_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._seller_entities: dict[str, list[tuple[str, str, frozenset[str]]]] = defaultdict(list)
+        self._active_listing_records: dict[str, list[tuple[int, Optional[int]]]] = defaultdict(list)
         self._item_listing_counts: dict[str, int] = defaultdict(int)
         self._pet_buckets: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+        self._listings_by_uuid: dict[str, ListingRecord] = {}
+        self._listings_by_cache_id: dict[str, dict[str, ListingRecord]] = defaultdict(dict)
+        self._domination_ratio_cache: dict[str, float] = {}
         self.last_pet_rejections: dict[str, str] = {}
         self._pet_dedupe_cache: dict[tuple, float] = {}
+        self._blacklist_cache: dict[tuple[str, str], bool] = {}
+        self._base_lbin_cache: dict[str, Optional[int]] = {}
         self.derpy_active: bool = bool(getattr(config, "MAYOR_DERPY_ACTIVE", False))
         self.derpy_collection_fee_rate: float = float(getattr(config, "DERPY_COLLECTION_FEE_RATE", 0.04))
         self.is_cold_start: bool = False
         self.telemetry: Optional[Any] = None
+        self.telemetry_snapshot: Optional[Any] = None
+        self.mayor_tracker: Optional[Any] = None
         self.last_decision: Optional[Decision] = None
+
+    def set_telemetry_snapshot(self, snapshot: Any) -> None:
+        """Atomically set or update in-memory market telemetry snapshot for zero-IO hot-path lookups."""
+        self.telemetry_snapshot = snapshot
+        if self.comps_evaluator is not None and hasattr(self.comps_evaluator, "set_telemetry_snapshot"):
+            self.comps_evaluator.set_telemetry_snapshot(snapshot)
+        if self.survival_auditor is not None and hasattr(self.survival_auditor, "set_cached_stats"):
+            self.survival_auditor.set_cached_stats(getattr(snapshot, "lane_conversion_stats", None) if snapshot else None)
+        if self.retention_fitter is not None and hasattr(self.retention_fitter, "set_cached_rates"):
+            self.retention_fitter.set_cached_rates(getattr(snapshot, "retention_rates", None) if snapshot else None)
+
+    def set_mayor_tracker(self, mayor_tracker: Any) -> None:
+        """Set or update mayor election tracker for Paul haircut and event decay adjustments."""
+        self.mayor_tracker = mayor_tracker
 
     def set_cold_start(self, is_cold: bool) -> None:
         """Set whether the market intelligence is in cold-start / warm-up state."""
@@ -299,16 +379,22 @@ class FlipEvaluator:
     def set_comps_evaluator(self, comps_evaluator: Any) -> None:
         """Set or update the comparable sales evaluator."""
         self.comps_evaluator = comps_evaluator
+        if self.telemetry_snapshot is not None and hasattr(comps_evaluator, "set_telemetry_snapshot"):
+            comps_evaluator.set_telemetry_snapshot(self.telemetry_snapshot)
         if self.db is None and hasattr(comps_evaluator, "db"):
             self.db = comps_evaluator.db
 
     def set_retention_fitter(self, retention_fitter: Any) -> None:
         """Set or update the Empirical Bayes retention fitter."""
         self.retention_fitter = retention_fitter
+        if self.telemetry_snapshot is not None and hasattr(retention_fitter, "set_cached_rates"):
+            retention_fitter.set_cached_rates(getattr(self.telemetry_snapshot, "retention_rates", None))
 
     def set_survival_auditor(self, survival_auditor: Any) -> None:
         """Set or update the market survival auditor."""
         self.survival_auditor = survival_auditor
+        if self.telemetry_snapshot is not None and hasattr(survival_auditor, "set_cached_stats"):
+            survival_auditor.set_cached_stats(getattr(self.telemetry_snapshot, "lane_conversion_stats", None))
 
     def calculate_queue_depth(
         self,
@@ -332,18 +418,22 @@ class FlipEvaluator:
         prices = self._price_cache.get(internal_id, [])
         if not prices:
             return 0
-        count = sum(1 for p in prices if p < target_resell)
-        if buy_price is not None and buy_price < target_resell and buy_price in prices:
-            count = max(0, count - 1)
+        count = bisect.bisect_left(prices, target_resell)
+        if buy_price is not None and buy_price < target_resell:
+            idx = bisect.bisect_left(prices, buy_price)
+            if idx < len(prices) and prices[idx] == buy_price:
+                count = max(0, count - 1)
         return count
 
     def _apply_economic_hardening(
         self,
         target_resell: int,
         valuation_path: str,
+        internal_id: Optional[str] = None,
     ) -> int:
         """
-        Applies lane conversion haircut (if conversion rate < 40%)
+        Applies lane conversion haircut (if conversion rate < 40%),
+        mayor Paul dungeon haircut (12% if Paul is active),
         and snaps price down to tax cliff boundaries if cliff snapping is enabled.
         """
         resell = target_resell
@@ -352,10 +442,13 @@ class FlipEvaluator:
             if haircut > 0.0:
                 resell = int(resell * (1.0 - haircut))
 
-        if getattr(self.config, "ENABLE_CLIFF_SNAPPING", True):
-            from src.constants.taxes import optimize_target_resell
+        if getattr(self, "mayor_tracker", None) is not None and internal_id:
+            p_haircut = self.mayor_tracker.get_dungeon_haircut(internal_id)
+            if p_haircut > 0.0:
+                resell = int(resell * (1.0 - p_haircut))
 
-            resell = optimize_target_resell(resell, derpy=getattr(self.config, "MAYOR_DERPY_ACTIVE", False))
+        if getattr(self.config, "ENABLE_CLIFF_SNAPPING", True):
+            resell = optimize_target_resell(resell, derpy=self.derpy_active)
 
         return resell
 
@@ -393,6 +486,8 @@ class FlipEvaluator:
             self._clean_price_cache = {k: sorted(v) for k, v in clean_cache.items()}
         else:
             self._clean_price_cache = {}
+        self._base_lbin_cache.clear()
+        self._domination_ratio_cache.clear()
         for k, v in self._price_cache.items():
             if k not in self._item_listing_counts or self._item_listing_counts[k] == 0:
                 self._item_listing_counts[k] = len(v)
@@ -400,6 +495,8 @@ class FlipEvaluator:
     def set_clean_price_cache(self, cache: dict[str, list[int]]) -> None:
         """Explicitly set or mock the clean price cache (useful for testing)."""
         self._clean_price_cache = {k: sorted(v) for k, v in cache.items()}
+        self._base_lbin_cache.clear()
+        self._domination_ratio_cache.clear()
 
     def set_seller_cache(
         self,
@@ -414,22 +511,103 @@ class FlipEvaluator:
             self._item_listing_counts = defaultdict(int, listing_counts)
         else:
             self._item_listing_counts = defaultdict(int, {k: sum(v.values()) for k, v in seller_counts.items()})
+        self._domination_ratio_cache.clear()
 
     def get_seller_domination_ratio(self, internal_id: str) -> float:
-        """Return the highest listing ownership percentage by a single seller for an item."""
+        """Return the highest listing ownership percentage by a single seller or clustered Sybil ring."""
+        if internal_id in self._domination_ratio_cache:
+            return self._domination_ratio_cache[internal_id]
+
         total = self._item_listing_counts.get(internal_id, 0)
         if total <= 0:
             prices = self._price_cache.get(internal_id, [])
             total = len(prices)
         if total <= 0:
+            self._domination_ratio_cache[internal_id] = 0.0
             return 0.0
+
+        entities = self._seller_entities.get(internal_id, [])
+        if entities:
+            parent: dict[str, str] = {}
+
+            def find(x: str) -> str:
+                if parent.setdefault(x, x) != x:
+                    parent[x] = find(parent[x])
+                return parent[x]
+
+            def union(x: str, y: str) -> None:
+                rx, ry = find(x), find(y)
+                if rx != ry:
+                    parent[rx] = ry
+
+            for seller, prof_id, coop_set in entities:
+                root_key = f"seller:{seller}" if seller else (f"prof:{prof_id}" if prof_id else None)
+                if not root_key:
+                    continue
+                find(root_key)
+                if prof_id:
+                    union(root_key, f"prof:{prof_id}")
+                for m in coop_set:
+                    if m:
+                        union(root_key, f"seller:{m}")
+
+            cluster_sizes: dict[str, int] = defaultdict(int)
+            for seller, prof_id, coop_set in entities:
+                root_key = f"seller:{seller}" if seller else (f"prof:{prof_id}" if prof_id else None)
+                if root_key:
+                    cluster_sizes[find(root_key)] += 1
+
+            if cluster_sizes:
+                ratio = float(max(cluster_sizes.values())) / float(total)
+                self._domination_ratio_cache[internal_id] = ratio
+                return ratio
 
         seller_dict = self._seller_counts.get(internal_id, {})
         if not seller_dict:
+            self._domination_ratio_cache[internal_id] = 0.0
             return 0.0
 
         max_count = max(seller_dict.values())
-        return float(max_count) / float(total)
+        ratio = float(max_count) / float(total)
+        self._domination_ratio_cache[internal_id] = ratio
+        return ratio
+
+    def is_temporal_listing_burst(self, internal_id: str, now_ms: Optional[float] = None) -> bool:
+        """
+        Temporal Listing Burst Detector (Phase 3.1):
+        Reject if >= 3 listings in the lowest 5 price slots were posted within a 20-minute window
+        for items with < 5 daily sales.
+        """
+        if not getattr(self.config, "ENABLE_SELLER_DOMINATION_GUARD", True):
+            return False
+
+        # Determine daily sales volume
+        daily_sales: Optional[float] = None
+        if self.velocity_tracker is not None:
+            daily_sales = self.velocity_tracker.get_daily_velocity(internal_id)
+        elif self.telemetry_snapshot is not None and hasattr(self.telemetry_snapshot, "comps_summary"):
+            s_stat = self.telemetry_snapshot.comps_summary.get(internal_id)
+            if s_stat is not None:
+                daily_sales = float(s_stat.comp_count)
+
+        # Only applies to items with confirmed < 5 daily sales
+        if daily_sales is None or daily_sales >= 5.0:
+            return False
+
+        records = self._active_listing_records.get(internal_id, [])
+        if len(records) < 3:
+            return False
+
+        lowest_5 = sorted(records, key=lambda x: x[0])[:5]
+        starts = sorted([s for p, s in lowest_5 if s is not None and s > 0])
+        if len(starts) < 3:
+            return False
+
+        window_ms = 20 * 60 * 1000  # 20 minutes
+        for i in range(len(starts) - 2):
+            if starts[i + 2] - starts[i] <= window_ms:
+                return True
+        return False
 
     def is_seller_dominated(
         self,
@@ -459,18 +637,28 @@ class FlipEvaluator:
         3. Fragged fallback: If this is a fragged item (e.g. STARRED_BAT_WAND), fall back to base item floor.
         4. Returns None safely if no listings exist at all.
         """
+        if internal_id in self._base_lbin_cache:
+            return self._base_lbin_cache[internal_id]
+
         clean_prices = self._clean_price_cache.get(internal_id, [])
         if clean_prices:
-            return clean_prices[0]
+            res = clean_prices[0]
+            self._base_lbin_cache[internal_id] = res
+            return res
 
         all_prices = self._price_cache.get(internal_id, [])
         if all_prices:
-            return all_prices[0]
+            res = all_prices[0]
+            self._base_lbin_cache[internal_id] = res
+            return res
 
         base_id = get_base_item_id(internal_id)
         if base_id and base_id != internal_id:
-            return self.get_base_lbin(base_id)
+            res = self.get_base_lbin(base_id)
+            self._base_lbin_cache[internal_id] = res
+            return res
 
+        self._base_lbin_cache[internal_id] = None
         return None
 
     def calculate_net_revenue(self, resell_price: int) -> int:
@@ -478,8 +666,6 @@ class FlipEvaluator:
         Calculate net revenue from target resell price accounting for creation and collection fees.
         src/constants/taxes.py is the single source of truth.
         """
-        from src.constants.taxes import net_revenue
-
         return net_revenue(
             resell_price,
             derpy_active=self.derpy_active,
@@ -506,66 +692,94 @@ class FlipEvaluator:
         if not internal_id or internal_id == "UNKNOWN":
             return False
 
+        cache_key = (internal_id, item_name)
+        if cache_key in self._blacklist_cache:
+            return self._blacklist_cache[cache_key]
+
         upper_id = internal_id.strip().upper()
 
         # Stage 0 Vanity Lane Check (Phase 7):
         if getattr(self.config, "ENABLE_VANITY_COMPS_LANE", False):
-            from src.addon_rules import is_permanently_blacklisted, is_vanity_item
-
             if is_permanently_blacklisted(upper_id, item_name):
+                self._blacklist_cache[cache_key] = True
                 return True
             if is_vanity_item(upper_id, item_name):
                 if self.comps_evaluator is not None and getattr(self.config, "ENABLE_SOLD_COMPS", False):
-                    db = getattr(self.comps_evaluator, "db", None)
-                    if db is not None:
-                        sales = db.get_sales(internal_id=upper_id, limit=getattr(self.config, "MIN_COMPS_THRESHOLD", 3))
-                        if len(sales) >= getattr(self.config, "MIN_COMPS_THRESHOLD", 3):
-                            return False
+                    min_thresh = getattr(self.config, "MIN_COMPS_THRESHOLD", 3)
+                    if self.telemetry_snapshot is not None:
+                        if hasattr(self.telemetry_snapshot, "comps_summary"):
+                            c_stats = self.telemetry_snapshot.comps_summary.get(upper_id)
+                            if c_stats is not None and c_stats.comp_count >= min_thresh:
+                                return False
+                        if hasattr(self.telemetry_snapshot, "sales_counts"):
+                            if self.telemetry_snapshot.sales_counts.get(upper_id, 0) >= min_thresh:
+                                return False
+                    else:
+                        db = getattr(self.comps_evaluator, "db", None) or self.db
+                        if db is not None:
+                            recent_sales = db.get_sales(
+                                internal_id=upper_id,
+                                limit=min_thresh,
+                            )
+                            if len(recent_sales) >= min_thresh:
+                                return False
                 return True
 
         # 1. Keywords to block
         if "_SKIN" in upper_id:
+            self._blacklist_cache[cache_key] = True
             return True
 
         if upper_id.startswith("PET_SKIN_") or "PET_SKIN" in upper_id:
+            self._blacklist_cache[cache_key] = True
             return True
 
         if upper_id.startswith("DYE_") or "DYE_" in upper_id:
+            self._blacklist_cache[cache_key] = True
             return True
 
         # RUNE (exact ID, prefix RUNE_, suffix _RUNE, or _RUNE_ infix)
         if upper_id == "RUNE" or upper_id.startswith("RUNE_") or upper_id.endswith("_RUNE") or "_RUNE_" in upper_id:
+            self._blacklist_cache[cache_key] = True
             return True
 
         if "PORTAL" in upper_id:
+            self._blacklist_cache[cache_key] = True
             return True
 
         if "FURNITURE" in upper_id:
+            self._blacklist_cache[cache_key] = True
             return True
 
         if "MUSIC_DISC" in upper_id:
+            self._blacklist_cache[cache_key] = True
             return True
 
         # 2. Configured exact IDs
         if any(upper_id == exact_id.strip().upper() for exact_id in self.config.COSMETIC_BLACKLIST_EXACT_IDS):
+            self._blacklist_cache[cache_key] = True
             return True
 
         # 3. Configured prefixes
         for prefix in self.config.COSMETIC_BLACKLIST_PREFIXES:
             if upper_id.startswith(prefix.strip().upper()):
+                self._blacklist_cache[cache_key] = True
                 return True
 
         # 4. Configured substrings
         for sub in self.config.COSMETIC_BLACKLIST_SUBSTRINGS:
             if sub.strip().upper() in upper_id:
+                self._blacklist_cache[cache_key] = True
                 return True
 
         # 5. Standalone rune display name check (e.g. "Couture Rune I", "Blood Rune III")
         if item_name:
             clean_name = item_name.strip(" \t\n\r◆")
             if re.search(r"\bRune(\s+[IVXLCDM]+)?$", clean_name, re.IGNORECASE):
+                self._blacklist_cache[cache_key] = True
                 return True
 
+        self._blacklist_cache[cache_key] = False
         return False
 
     def is_blacklisted_cosmetic(self, internal_id: str, item_name: str = "") -> bool:
@@ -684,8 +898,6 @@ class FlipEvaluator:
         Lookup instant-buy price for an enchanted book with Minecraft anvil tier compounding.
         Delegates to src.networth_evaluator.calculate_enchant_bazaar_cost.
         """
-        from src.enchant_evaluator import get_enchant_bazaar_cost
-
         return get_enchant_bazaar_cost(self.bazaar_cache, enchant_name, level)
 
     @staticmethod
@@ -717,8 +929,12 @@ class FlipEvaluator:
         new_cache: dict[str, list[int]] = defaultdict(list)
         clean_cache: dict[str, list[int]] = defaultdict(list)
         new_seller_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        new_seller_entities: dict[str, list[tuple[str, str, frozenset[str]]]] = defaultdict(list)
+        new_listing_records: dict[str, list[tuple[int, Optional[int]]]] = defaultdict(list)
         new_listing_counts: dict[str, int] = defaultdict(int)
         new_pet_buckets: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+        new_listings_by_uuid: dict[str, ListingRecord] = {}
+        new_listings_by_cache_id: dict[str, dict[str, ListingRecord]] = defaultdict(dict)
         current_now_ms = now_ms if now_ms is not None else (time.time() * 1000.0)
 
         for auction, decoded in decoded_auctions:
@@ -739,36 +955,68 @@ class FlipEvaluator:
             if price is not None and isinstance(price, (int, float)) and price > 0:
                 item_count = max(1, int(decoded.get("count") or 1))
                 int_price = int(price) // item_count
-                new_cache[internal_id].append(int_price)
-                new_listing_counts[internal_id] += 1
+                cache_id = internal_id
+                if decoded.get("is_pet"):
+                    eff_tier = str(decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON")).strip().upper()
+                    p_type = str(decoded.get("pet_type", "")).strip().upper()
+                    if p_type and eff_tier:
+                        cache_id = f"PET_{p_type}_{eff_tier}"
+
+                new_cache[cache_id].append(int_price)
+                new_listing_counts[cache_id] += 1
 
                 seller = str(auction.get("auctioneer") or auction.get("seller") or "")
                 if seller:
-                    new_seller_counts[internal_id][seller] += 1
+                    new_seller_counts[cache_id][seller] += 1
+                prof_id = str(auction.get("profile_id") or "")
+                coop_members = frozenset(str(m) for m in (auction.get("coop") or []))
+                new_seller_entities[cache_id].append((seller, prof_id, coop_members))
+                new_listing_records[cache_id].append((int_price, start_ms))
 
                 # Clean item check: must strictly match is_upgraded_item (no enchants, gems, reforges, etc.)
-                if not self.is_upgraded_item(decoded):
-                    clean_cache[internal_id].append(int_price)
+                is_upg = self.is_upgraded_item(decoded)
+                if not is_upg:
+                    clean_cache[cache_id].append(int_price)
 
-                if decoded.get("is_pet"):
+                is_pet = bool(decoded.get("is_pet"))
+                b_key = None
+                pet_rec = None
+                if is_pet:
                     minor_thresh = getattr(self.config, "PET_MINOR_HELD_ITEM_THRESHOLD_COINS", 2_000_000)
                     b_key = get_pet_bucket_key(decoded, minor_threshold=minor_thresh, bazaar_cache=self.bazaar_cache)
-                    new_pet_buckets[b_key].append(
-                        {
-                            "uuid": str(auction.get("uuid", "")),
-                            "price": int_price,
-                            "xp": float(decoded.get("pet_exp", 0.0)),
-                            "level": int(decoded.get("pet_level", 1)),
-                            "auctioneer": seller,
-                            "start": start_ms,
-                            "item_name": item_name,
-                            "candy_used": int(decoded.get("pet_candy_used", 0)),
-                            "skin": decoded.get("pet_skin"),
-                            "held_item": decoded.get("pet_held_item", ""),
-                            "effective_tier": decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON"),
-                            "pet_type": decoded.get("pet_type", ""),
-                        }
-                    )
+                    pet_rec = {
+                        "uuid": str(auction.get("uuid", "")),
+                        "price": int_price,
+                        "xp": float(decoded.get("pet_exp", 0.0)),
+                        "level": int(decoded.get("pet_level", 1)),
+                        "auctioneer": seller,
+                        "start": start_ms,
+                        "item_name": item_name,
+                        "candy_used": int(decoded.get("pet_candy_used", 0)),
+                        "skin": decoded.get("pet_skin"),
+                        "held_item": decoded.get("pet_held_item", ""),
+                        "effective_tier": decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON"),
+                        "pet_type": decoded.get("pet_type", ""),
+                    }
+                    new_pet_buckets[b_key].append(pet_rec)
+
+                u_str = str(auction.get("uuid", ""))
+                rec = ListingRecord(
+                    uuid=u_str,
+                    cache_id=cache_id,
+                    price=int_price,
+                    start_ms=start_ms,
+                    seller=seller,
+                    prof_id=prof_id,
+                    coop_members=coop_members,
+                    is_upgraded=is_upg,
+                    is_pet=is_pet,
+                    pet_bucket_key=b_key,
+                    pet_record=pet_rec,
+                )
+                if u_str:
+                    new_listings_by_uuid[u_str] = rec
+                    new_listings_by_cache_id[cache_id][u_str] = rec
 
         for internal_id in new_cache:
             new_cache[internal_id].sort()
@@ -782,8 +1030,15 @@ class FlipEvaluator:
         self._price_cache = dict(new_cache)
         self._clean_price_cache = dict(clean_cache)
         self._seller_counts = new_seller_counts
+        self._seller_entities = new_seller_entities
+        self._active_listing_records = new_listing_records
         self._item_listing_counts = new_listing_counts
         self._pet_buckets = new_pet_buckets
+        self._listings_by_uuid = new_listings_by_uuid
+        self._listings_by_cache_id = new_listings_by_cache_id
+        self._base_lbin_cache.clear()
+        self._domination_ratio_cache.clear()
+        self._blacklist_cache.clear()
 
     def insert_listing(
         self,
@@ -814,21 +1069,38 @@ class FlipEvaluator:
         if self._is_expired(auction, current_now_ms):
             return
 
-        if internal_id not in self._price_cache:
-            self._price_cache[internal_id] = []
-        bisect.insort(self._price_cache[internal_id], int_price)
-        self._item_listing_counts[internal_id] += 1
+        cache_id = internal_id
+        if decoded.get("is_pet"):
+            eff_tier = str(decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON")).strip().upper()
+            p_type = str(decoded.get("pet_type", "")).strip().upper()
+            if p_type and eff_tier:
+                cache_id = f"PET_{p_type}_{eff_tier}"
+
+        self._base_lbin_cache.pop(cache_id, None)
+
+        if cache_id not in self._price_cache:
+            self._price_cache[cache_id] = []
+        bisect.insort(self._price_cache[cache_id], int_price)
+        self._item_listing_counts[cache_id] += 1
 
         seller = str(auction.get("auctioneer") or auction.get("seller") or "")
         if seller:
-            self._seller_counts[internal_id][seller] += 1
+            self._seller_counts[cache_id][seller] += 1
+        prof_id = str(auction.get("profile_id") or "")
+        coop_members = frozenset(str(m) for m in (auction.get("coop") or []))
+        self._seller_entities[cache_id].append((seller, prof_id, coop_members))
+        self._active_listing_records[cache_id].append((int_price, start_ms))
 
-        if not self.is_upgraded_item(decoded):
-            if internal_id not in self._clean_price_cache:
-                self._clean_price_cache[internal_id] = []
-            bisect.insort(self._clean_price_cache[internal_id], int_price)
+        is_upg = self.is_upgraded_item(decoded)
+        if not is_upg:
+            if cache_id not in self._clean_price_cache:
+                self._clean_price_cache[cache_id] = []
+            bisect.insort(self._clean_price_cache[cache_id], int_price)
 
-        if decoded.get("is_pet"):
+        is_pet = bool(decoded.get("is_pet"))
+        b_key = None
+        record = None
+        if is_pet:
             minor_thresh = getattr(self.config, "PET_MINOR_HELD_ITEM_THRESHOLD_COINS", 2_000_000)
             b_key = get_pet_bucket_key(decoded, minor_threshold=minor_thresh, bazaar_cache=self.bazaar_cache)
             record = {
@@ -850,6 +1122,197 @@ class FlipEvaluator:
             while insert_idx < len(bucket_list) and bucket_list[insert_idx]["price"] <= int_price:
                 insert_idx += 1
             bucket_list.insert(insert_idx, record)
+
+        u_str = str(auction.get("uuid", ""))
+        rec = ListingRecord(
+            uuid=u_str,
+            cache_id=cache_id,
+            price=int_price,
+            start_ms=start_ms,
+            seller=seller,
+            prof_id=prof_id,
+            coop_members=coop_members,
+            is_upgraded=is_upg,
+            is_pet=is_pet,
+            pet_bucket_key=b_key,
+            pet_record=record,
+        )
+        if u_str:
+            self._listings_by_uuid[u_str] = rec
+            self._listings_by_cache_id[cache_id][u_str] = rec
+        self._domination_ratio_cache.pop(cache_id, None)
+
+    def remove_listing(
+        self,
+        auction: dict[str, Any],
+        decoded: dict[str, Any],
+    ) -> None:
+        """Remove a single vanished/expired auction listing from active indexes in-place."""
+        internal_id = decoded.get("internal_id")
+        if not internal_id or internal_id == "UNKNOWN":
+            return
+        price = auction.get("starting_bid")
+        if price is None or not isinstance(price, (int, float)) or price <= 0:
+            return
+        item_count = max(1, int(decoded.get("count") or 1))
+        int_price = int(price) // item_count
+
+        cache_id = internal_id
+        if decoded.get("is_pet"):
+            eff_tier = str(decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON")).strip().upper()
+            p_type = str(decoded.get("pet_type", "")).strip().upper()
+            if p_type and eff_tier:
+                cache_id = f"PET_{p_type}_{eff_tier}"
+
+        uuid_str = str(auction.get("uuid", ""))
+        if uuid_str:
+            self._listings_by_uuid.pop(uuid_str, None)
+            if cache_id in self._listings_by_cache_id:
+                self._listings_by_cache_id[cache_id].pop(uuid_str, None)
+                if not self._listings_by_cache_id[cache_id]:
+                    self._listings_by_cache_id.pop(cache_id, None)
+
+        self._base_lbin_cache.pop(cache_id, None)
+        self._domination_ratio_cache.pop(cache_id, None)
+
+        if cache_id in self._price_cache:
+            try:
+                self._price_cache[cache_id].remove(int_price)
+            except ValueError:
+                pass
+            if not self._price_cache[cache_id]:
+                self._price_cache.pop(cache_id, None)
+
+        if self._item_listing_counts.get(cache_id, 0) > 0:
+            self._item_listing_counts[cache_id] -= 1
+            if self._item_listing_counts[cache_id] == 0:
+                self._item_listing_counts.pop(cache_id, None)
+
+        seller = str(auction.get("auctioneer") or auction.get("seller") or "")
+        if seller and cache_id in self._seller_counts and seller in self._seller_counts[cache_id]:
+            self._seller_counts[cache_id][seller] -= 1
+            if self._seller_counts[cache_id][seller] <= 0:
+                self._seller_counts[cache_id].pop(seller, None)
+
+        prof_id = str(auction.get("profile_id") or "")
+        coop_members = frozenset(str(m) for m in (auction.get("coop") or []))
+        if cache_id in self._seller_entities:
+            entry = (seller, prof_id, coop_members)
+            if entry in self._seller_entities[cache_id]:
+                self._seller_entities[cache_id].remove(entry)
+
+        if cache_id in self._active_listing_records:
+            for idx, (p, s) in enumerate(self._active_listing_records[cache_id]):
+                if p == int_price:
+                    self._active_listing_records[cache_id].pop(idx)
+                    break
+
+        if not self.is_upgraded_item(decoded) and cache_id in self._clean_price_cache:
+            try:
+                self._clean_price_cache[cache_id].remove(int_price)
+            except ValueError:
+                pass
+            if not self._clean_price_cache[cache_id]:
+                self._clean_price_cache.pop(cache_id, None)
+
+        if decoded.get("is_pet"):
+            minor_thresh = getattr(self.config, "PET_MINOR_HELD_ITEM_THRESHOLD_COINS", 2_000_000)
+            b_key = get_pet_bucket_key(decoded, minor_threshold=minor_thresh, bazaar_cache=self.bazaar_cache)
+            if b_key in self._pet_buckets:
+                self._pet_buckets[b_key] = [item for item in self._pet_buckets[b_key] if item.get("uuid") != uuid_str]
+                if not self._pet_buckets[b_key]:
+                    self._pet_buckets.pop(b_key, None)
+
+    def prune_vanished_auctions(
+        self,
+        vanished_uuids: set[str],
+        active_auctions: dict[str, tuple[dict[str, Any], dict[str, Any]]],
+    ) -> None:
+        """
+        Prune all vanished listings from in-memory floor books using fast indexed bulk pruning.
+        Achieves sub-15ms execution over 3,000+ vanished auctions.
+        """
+        if not vanished_uuids:
+            return
+
+        dirty_cache_ids: set[str] = set()
+        dirty_pet_buckets: set[tuple] = set()
+
+        for u in vanished_uuids:
+            rec = self._listings_by_uuid.pop(u, None)
+            if rec is not None:
+                cid = rec.cache_id
+                dirty_cache_ids.add(cid)
+                if cid in self._listings_by_cache_id:
+                    self._listings_by_cache_id[cid].pop(u, None)
+                if rec.is_pet and rec.pet_bucket_key:
+                    dirty_pet_buckets.add(rec.pet_bucket_key)
+            elif u in active_auctions:
+                auction, decoded = active_auctions[u]
+                self.remove_listing(auction, decoded)
+
+        # Rebuild only affected dirty cache IDs in a single pass
+        for cid in dirty_cache_ids:
+            self._base_lbin_cache.pop(cid, None)
+            self._domination_ratio_cache.pop(cid, None)
+
+            remaining_map = self._listings_by_cache_id.get(cid)
+            if not remaining_map:
+                self._price_cache.pop(cid, None)
+                self._clean_price_cache.pop(cid, None)
+                self._seller_counts.pop(cid, None)
+                self._seller_entities.pop(cid, None)
+                self._active_listing_records.pop(cid, None)
+                self._item_listing_counts.pop(cid, None)
+                self._listings_by_cache_id.pop(cid, None)
+            else:
+                prices: list[int] = []
+                clean_prices: list[int] = []
+                seller_counts: dict[str, int] = defaultdict(int)
+                seller_entities: list[tuple[str, str, frozenset[str]]] = []
+                active_records: list[tuple[int, Optional[int]]] = []
+
+                for r in remaining_map.values():
+                    prices.append(r.price)
+                    if not r.is_upgraded:
+                        clean_prices.append(r.price)
+                    if r.seller:
+                        seller_counts[r.seller] += 1
+                    seller_entities.append((r.seller, r.prof_id, r.coop_members))
+                    active_records.append((r.price, r.start_ms))
+
+                prices.sort()
+                clean_prices.sort()
+
+                self._price_cache[cid] = prices
+                if clean_prices:
+                    self._clean_price_cache[cid] = clean_prices
+                else:
+                    self._clean_price_cache.pop(cid, None)
+                self._seller_counts[cid] = seller_counts
+                self._seller_entities[cid] = seller_entities
+                self._active_listing_records[cid] = active_records
+                self._item_listing_counts[cid] = len(prices)
+
+        for b_key in dirty_pet_buckets:
+            if b_key in self._pet_buckets:
+                self._pet_buckets[b_key] = [
+                    item for item in self._pet_buckets[b_key] if item.get("uuid") not in vanished_uuids
+                ]
+                if not self._pet_buckets[b_key]:
+                    self._pet_buckets.pop(b_key, None)
+
+        for u in vanished_uuids:
+            active_auctions.pop(u, None)
+
+    def overlay_new_auctions(
+        self,
+        new_pairs: list[tuple[dict[str, Any], dict[str, Any]]],
+        now_ms: Optional[float] = None,
+    ) -> None:
+        """Insert a batch of newly decoded auctions into active indexes."""
+        for auction, decoded in new_pairs:
+            self.insert_listing(auction, decoded, now_ms=now_ms)
 
     def _evaluate_upgraded_listing(
         self,
@@ -875,8 +1338,6 @@ class FlipEvaluator:
         buy_price = int(auction.get("starting_bid", 0))
         if buy_price <= 0:
             return None
-
-        from src.networth_evaluator import calculate_item_networth
 
         override_retention = None
         if getattr(self.config, "ENABLE_DYNAMIC_RETENTION", False) and self.retention_fitter is not None:
@@ -925,7 +1386,7 @@ class FlipEvaluator:
             craft_cost = calculate_craft_cost(internal_id, self.bazaar_cache, ah_cache=self)
 
         if craft_cost is not None:
-            retained_addon_value = int(round(total_addon_cost * retention_rate))
+            retained_addon_value = max(0, resell_baseline - base_lbin)
             effective_craft_cost = craft_cost + retained_addon_value
 
             # Gate 1 (Never Buy Above Craft Cost)
@@ -956,7 +1417,7 @@ class FlipEvaluator:
         if resell_baseline > (buy_price * self.config.MAX_TARGET_TO_BUY_RATIO):
             return None
 
-        resell_baseline = self._apply_economic_hardening(resell_baseline, "PATH_B")
+        resell_baseline = self._apply_economic_hardening(resell_baseline, "PATH_B", internal_id=internal_id)
         net_revenue = self.calculate_net_revenue(resell_baseline)
         net_profit = int(round(net_revenue - buy_price))
         margin_pct = (net_profit / buy_price) * 100.0
@@ -1040,36 +1501,45 @@ class FlipEvaluator:
         item_count = max(1, int(decoded_data.get("count") or 1))
         unit_buy_price = buy_price // item_count
 
-        # Candidate excludes itself
-        other_prices = list(sorted_prices)
-        if unit_buy_price in other_prices:
-            other_prices.remove(unit_buy_price)
-
+        is_upgraded = self.is_upgraded_item(decoded_data)
         ref_pool = sorted_prices
-        if not self.is_upgraded_item(decoded_data):
+        clean_floor: Optional[int] = None
+        if not is_upgraded:
             clean_pool = self._clean_price_cache.get(internal_id)
             if clean_pool:
                 ref_pool = clean_pool
-                clean_others = list(clean_pool)
-                if unit_buy_price in clean_others:
-                    clean_others.remove(unit_buy_price)
-                if not clean_others:
-                    return None
-                # Upgraded listings priced above the clean floor are not comparable; cheaper ones
-                # still dominate a clean copy, so they remain and can lower the reference.
-                clean_floor = clean_others[0]
-                other_prices = [p for p in other_prices if p <= clean_floor]
-
-        if not other_prices:
-            return None
+                if clean_pool[0] < unit_buy_price:
+                    clean_floor = clean_pool[0]
+                elif clean_pool[0] == unit_buy_price:
+                    if len(clean_pool) < 2:
+                        return None
+                    clean_floor = clean_pool[1]
+                else:
+                    clean_floor = clean_pool[0]
 
         # Path A Sample Size Gate: require at least PATH_A_MIN_LISTINGS (or MIN_SAMPLE_SIZE)
         path_a_min = min(getattr(self.config, "PATH_A_MIN_LISTINGS", 3), self.config.MIN_SAMPLE_SIZE)
         if len(ref_pool) < path_a_min:
             return None
 
+        # Candidate excludes itself
+        if not sorted_prices:
+            return None
+
+        if sorted_prices[0] < unit_buy_price:
+            other_0 = sorted_prices[0]
+            other_1 = sorted_prices[1] if len(sorted_prices) > 1 else None
+        elif sorted_prices[0] == unit_buy_price:
+            if len(sorted_prices) < 2:
+                return None
+            other_0 = sorted_prices[1]
+            other_1 = sorted_prices[2] if len(sorted_prices) > 2 else None
+        else:
+            other_0 = sorted_prices[0]
+            other_1 = sorted_prices[1] if len(sorted_prices) > 1 else None
+
         # Reference price is lowest price among other active listings
-        ref_price = other_prices[0]
+        ref_price = other_0
 
         # Floor tie: If any other listing is at or below candidate's price (within 1%), no flip
         tie_tol = getattr(self.config, "MERGED_FLOOR_TIE_TOLERANCE_PCT", 1.0) / 100.0
@@ -1077,13 +1547,43 @@ class FlipEvaluator:
             return None
 
         # Supply dump: skip when 2+ other listings share the lowest price (within 1%)
-        dump_count = sum(1 for p in other_prices if p <= ref_price * (1.0 + tie_tol))
-        if dump_count >= 2:
-            return None
+        if other_1 is not None:
+            max_dump = ref_price * (1.0 + tie_tol)
+            if clean_floor is not None:
+                max_dump = min(max_dump, float(clean_floor))
+            if other_1 <= max_dump:
+                return None
 
-        # Anti-Domination Guard (Phase 6): reject if >= 40% of listings belong to one seller
+        # Anti-Domination Guard (Phase 6): reject if >= 40% of listings belong to one seller or Sybil cluster
         if getattr(self.config, "ENABLE_SELLER_DOMINATION_GUARD", False):
             if self.is_seller_dominated(internal_id):
+                return None
+
+        # Temporal Listing Burst Guard (Phase 3.1):
+        if self.is_temporal_listing_burst(internal_id):
+            logger.info("Rejecting clean flip [%s]: reason=TEMPORAL_LISTING_BURST", internal_id)
+            return None
+
+        # Floor-to-Comps Anchor Ratio Guard (Phase 3.1):
+        comp_med = None
+        if self.telemetry_snapshot is not None and hasattr(self.telemetry_snapshot, "comps_summary"):
+            s_stat = self.telemetry_snapshot.comps_summary.get(internal_id)
+            if s_stat is not None and s_stat.median_price > 0:
+                comp_med = s_stat.median_price
+        elif self.comps_evaluator is not None and hasattr(self.comps_evaluator, "get_cached_median"):
+            comp_med = self.comps_evaluator.get_cached_median(internal_id)
+
+        if comp_med is not None and comp_med > 0:
+            daily_vel = self.velocity_tracker.get_daily_velocity(internal_id) if self.velocity_tracker else None
+            vol = daily_vel if daily_vel is not None else 0.0
+            if ref_price > (2.2 * comp_med) and vol < 10.0:
+                logger.info(
+                    "Rejecting clean flip [%s]: reason=PUMPED_FLOOR_SUSPECT (LBIN_2 %d > 2.2x comp_med %d, vol=%.1f)",
+                    internal_id,
+                    ref_price,
+                    comp_med,
+                    vol,
+                )
                 return None
 
         # Fragged / Base-linked item ceiling (e.g. STARRED_BAT_WAND -> BAT_WAND + 8x THORN_FRAGMENT)
@@ -1153,7 +1653,7 @@ class FlipEvaluator:
         if target_resell_price > (buy_price * self.config.MAX_TARGET_TO_BUY_RATIO):
             return None
 
-        target_resell_price = self._apply_economic_hardening(target_resell_price, "PATH_A")
+        target_resell_price = self._apply_economic_hardening(target_resell_price, "PATH_A", internal_id=internal_id)
 
         # Net revenue accounting for Hypixel AH listing tax
         net_revenue = self.calculate_net_revenue(target_resell_price)
@@ -1350,8 +1850,6 @@ class FlipEvaluator:
 
         pet_candy_used = int(decoded_data.get("pet_candy_used", 0))
         if pet_candy_used > 0:
-            from src.addon_rules import calculate_pet_candy_penalty
-
             penalty_pct = calculate_pet_candy_penalty(
                 pet_candy_used,
                 getattr(self.config, "PET_CANDY_PENALTY_PER_CANDY", 0.015),
@@ -1432,10 +1930,20 @@ class FlipEvaluator:
         current_now_ms = now_ms if now_ms is not None else (time.time() * 1000.0)
         pet_type = str(decoded_data.get("pet_type", "")).strip().upper()
         pet_tier = str(decoded_data.get("pet_tier", "COMMON")).strip().upper()
-        effective_tier = str(decoded_data.get("effective_tier") or pet_tier).strip().upper()
+        pet_held_item = str(decoded_data.get("pet_held_item", "")).strip().upper()
+        raw_eff_tier = str(decoded_data.get("effective_tier") or "").strip().upper()
+        if raw_eff_tier:
+            effective_tier = raw_eff_tier
+        else:
+            effective_tier = pet_tier
+            if pet_held_item == "PET_ITEM_TIER_BOOST":
+                rarity_order = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY", "MYTHIC"]
+                if pet_tier in rarity_order:
+                    idx = rarity_order.index(pet_tier)
+                    if idx < len(rarity_order) - 1:
+                        effective_tier = rarity_order[idx + 1]
         pet_level = int(decoded_data.get("pet_level", 1))
         pet_exp = float(decoded_data.get("pet_exp", 0.0))
-        pet_held_item = str(decoded_data.get("pet_held_item", "")).strip().upper()
         held_item_name, held_item_value = get_pet_held_item_info(pet_held_item, self.bazaar_cache)
         pet_candy_used = int(decoded_data.get("pet_candy_used", 0))
         pet_skin = decoded_data.get("pet_skin")
@@ -1526,13 +2034,33 @@ class FlipEvaluator:
                         return None
 
         # Fetch persisted sold comps in 48h lookback window
-        comps_window_hours = getattr(self.config, "PET_COMPS_WINDOW_HOURS", 48.0)
-        start_window_ms = int(current_now_ms - comps_window_hours * 3600.0 * 1000.0)
-
-        db_instance = self.db or (getattr(self.comps_evaluator, "db", None) if self.comps_evaluator else None)
+        base_internal_id = str(decoded_data.get("internal_id", "")).strip().upper()
         raw_sales: list[dict[str, Any]] = []
-        if db_instance is not None:
-            raw_sales = db_instance.get_sales(internal_id=internal_id, start_time=start_window_ms)
+        if self.telemetry_snapshot is not None:
+            if hasattr(self.telemetry_snapshot, "pet_sales"):
+                raw_sales = list(self.telemetry_snapshot.pet_sales.get(internal_id, []))
+                if base_internal_id and base_internal_id != internal_id:
+                    raw_sales.extend(self.telemetry_snapshot.pet_sales.get(base_internal_id, []))
+        else:
+            db_instance = self.db or (getattr(self.comps_evaluator, "db", None) if self.comps_evaluator else None)
+            if db_instance is not None:
+                lookback_ms = int(getattr(self.config, "PET_LOOKBACK_HOURS", 48.0) * 3600.0 * 1000.0)
+                since_ms = int(current_now_ms - lookback_ms)
+                raw_sales = list(
+                    db_instance.get_sales(
+                        internal_id=internal_id,
+                        start_time=since_ms,
+                        limit=100,
+                    )
+                )
+                if base_internal_id and base_internal_id != internal_id:
+                    raw_sales.extend(
+                        db_instance.get_sales(
+                            internal_id=base_internal_id,
+                            start_time=since_ms,
+                            limit=100,
+                        )
+                    )
 
         # Filter sales matching exact bucket
         matching_sales: list[dict[str, Any]] = []
@@ -1625,8 +2153,6 @@ class FlipEvaluator:
 
         # Pet candy penalty if applicable
         if pet_candy_used > 0:
-            from src.addon_rules import calculate_pet_candy_penalty
-
             penalty_pct = calculate_pet_candy_penalty(
                 pet_candy_used,
                 getattr(self.config, "PET_CANDY_PENALTY_PER_CANDY", 0.015),
@@ -1658,9 +2184,9 @@ class FlipEvaluator:
         if target_resell > (buy_price * max(self.config.MAX_TARGET_TO_BUY_RATIO, 5.0)):
             return None
 
-        target_resell = self._apply_economic_hardening(target_resell, "PET_BUCKET")
+        target_resell = self._apply_economic_hardening(target_resell, "PET_BUCKET", internal_id=internal_id)
         optimistic_target = min(ref_price or comp_median, comp_median)
-        optimistic_target = self._apply_economic_hardening(optimistic_target, "PET_BUCKET")
+        optimistic_target = self._apply_economic_hardening(optimistic_target, "PET_BUCKET", internal_id=internal_id)
 
         net_revenue = self.calculate_net_revenue(target_resell)
         net_profit = int(net_revenue - buy_price)
@@ -1777,6 +2303,12 @@ class FlipEvaluator:
         is_upgraded = self.is_upgraded_item(decoded_data)
         base_lbin = self.get_base_lbin(internal_id) or (sorted_prices[0] if sorted_prices else buy_price)
 
+        # Fast path: Clean (non-addon) items priced at or above the active floor can never be comps flips
+        if not is_upgraded:
+            active_floor = base_lbin or (sorted_prices[0] if sorted_prices else 0)
+            if active_floor > 0 and buy_price >= active_floor:
+                return None, False
+
         addon_breakdown: list[dict[str, Any]] = []
         total_addon_cost = 0
         intrinsic_worth = 0
@@ -1784,8 +2316,6 @@ class FlipEvaluator:
         path_b_resell: Optional[int] = None
 
         if is_upgraded and self.bazaar_cache is not None:
-            from src.networth_evaluator import calculate_item_networth
-
             override_retention = None
             if getattr(self.config, "ENABLE_DYNAMIC_RETENTION", False) and self.retention_fitter is not None:
                 override_retention = self.retention_fitter.get_retention_rate(internal_id, base_lbin)
@@ -1865,8 +2395,8 @@ class FlipEvaluator:
             return None, True
 
         # Apply economic hardening (lane conversion haircut + tax cliff snapping)
-        target_resell = self._apply_economic_hardening(target_resell, lane)
-        optimistic_target = self._apply_economic_hardening(optimistic_target, lane)
+        target_resell = self._apply_economic_hardening(target_resell, lane, internal_id=internal_id)
+        optimistic_target = self._apply_economic_hardening(optimistic_target, lane, internal_id=internal_id)
 
         net_revenue = self.calculate_net_revenue(target_resell)
         net_profit = int(round(net_revenue - buy_price))
@@ -1969,8 +2499,6 @@ class FlipEvaluator:
             is_upgraded=flip.is_networth_snipe,
         )
 
-        from src.constants.taxes import best_resale_net
-
         best_res = best_resale_net(
             flip.target_resell_price,
             derpy_active=self.derpy_active,
@@ -1981,11 +2509,22 @@ class FlipEvaluator:
         flip.derpy_active = self.derpy_active
         flip.fee_model_version = 2
         flip.listing_start = flip.listing_start or getattr(self, "_current_auction_start", None)
+        curr_dec = getattr(self, "_current_decoded_data", None)
+        if curr_dec:
+            if not flip.item_instance_uuid:
+                inst_uuid = curr_dec.get("item_instance_uuid") or curr_dec.get("item_uuid")
+                if inst_uuid:
+                    flip.item_instance_uuid = str(inst_uuid)
+            if not flip.features_json:
+                flip.features_json = json.dumps(curr_dec, separators=(",", ":"))
 
         if getattr(self.config, "ENABLE_CAPITAL_EFFICIENCY", True):
-            from src.ranking import score_and_rank_flip
-
-            flip = score_and_rank_flip(flip, self.config, db=self.db)
+            flip = score_and_rank_flip(
+                flip,
+                self.config,
+                db=self.db,
+                telemetry_snapshot=self.telemetry_snapshot,
+            )
             min_ces = getattr(self.config, "MIN_CAPITAL_EFFICIENCY", 0.0)
             if min_ces > 0.0 and (flip.capital_efficiency or 0.0) < min_ces:
                 return None
@@ -2014,6 +2553,7 @@ class FlipEvaluator:
                 "comp_median": flip.comp_median,
                 "listing_start": flip.listing_start,
                 "capital_efficiency": flip.capital_efficiency,
+                "capital_velocity_score": flip.capital_velocity_score,
                 "estimated_hold_hours": flip.estimated_hold_hours,
                 "craft_cost": flip.craft_cost,
                 "is_craft_capped": flip.is_craft_capped,
@@ -2033,6 +2573,7 @@ class FlipEvaluator:
         auction: dict[str, Any],
         decoded_data: dict[str, Any],
         now_ms: Optional[float] = None,
+        delta_context: Optional[dict[str, Any]] = None,
     ) -> Decision:
         """
         Evaluate a single BIN auction listing and return a structured Decision
@@ -2051,6 +2592,7 @@ class FlipEvaluator:
             except (ValueError, TypeError):
                 start_ms = None
         self._current_auction_start = start_ms
+        self._current_decoded_data = decoded_data
 
         intermediates: dict[str, Any] = {
             "uuid": uuid,
@@ -2071,21 +2613,86 @@ class FlipEvaluator:
             )
             self.last_decision = dec
             if self.telemetry is not None and hasattr(self.telemetry, "record_rejection"):
-                self.telemetry.record_rejection(reason)
+                telemetry_reason = "listing_too_old" if "listing_too_old" in reason else reason
+                self.telemetry.record_rejection(telemetry_reason)
             return dec
+
+        # Max listing age gate (drops stale listings that have sat on AH for hours)
+        max_snipe_age = getattr(self.config, "MAX_SNIPE_LISTING_AGE_SECONDS", 0)
+        if max_snipe_age > 0 and start_ms is not None and start_ms > 0:
+            ref_now_ms = now_ms if now_ms is not None else (time.time() * 1000.0)
+            age_seconds = max(0.0, (ref_now_ms - start_ms) / 1000.0)
+            if age_seconds > float(max_snipe_age):
+                return _reject(f"listing_too_old ({int(age_seconds)}s > {max_snipe_age}s)", path="AGE_GATE")
 
         if not internal_id or internal_id == "UNKNOWN":
             return _reject("unknown_internal_id")
+
+        if buy_price <= 0:
+            return _reject("invalid_buy_price")
 
         # Stage 0: Universal Blacklist Gate (Cosmetic, Dye, Vanity, Illiquid Bait)
         item_name = decoded_data.get("item_name") or auction.get("item_name", "")
         if self.is_blacklisted(internal_id, item_name):
             return _reject("blacklisted")
 
+        cache_id = internal_id
+        if decoded_data.get("is_pet"):
+            eff_tier = str(decoded_data.get("effective_tier") or decoded_data.get("pet_tier", "COMMON")).strip().upper()
+            p_type = str(decoded_data.get("pet_type", "")).strip().upper()
+            if p_type and eff_tier:
+                cache_id = f"PET_{p_type}_{eff_tier}"
+
+        count = max(1, int(decoded_data.get("count", 1)))
+        unit_buy_price = buy_price // count
+
+        # Delta Pipeline Intra-Batch Guards (Phase 1.2):
+        if delta_context:
+            batch_items = delta_context.get("batch_items", {})
+            same_item_listings = batch_items.get(cache_id) or batch_items.get(internal_id, [])
+
+            # 1. INTRA_BATCH_SUPPLY_DUMP Guard:
+            prev_floors = delta_context.get("prev_tick_floors", {})
+            prev_floor = prev_floors.get(cache_id) if cache_id in prev_floors else prev_floors.get(internal_id)
+            if prev_floor is not None and prev_floor > 0:
+                daily_vel = self.velocity_tracker.get_daily_velocity(internal_id) if self.velocity_tracker else None
+                vol = daily_vel if daily_vel is not None else 0.0
+                if vol < 10.0:
+                    dump_below_prev = sum(
+                        1 for a in same_item_listings
+                        if (int(a.get("starting_bid", 0)) // max(1, int(a.get("_unit_count", 1)))) < prev_floor
+                    )
+                    if dump_below_prev >= 3:
+                        return _reject("INTRA_BATCH_SUPPLY_DUMP", lane=LANE_FLOOR, path="DELTA_GUARD")
+
+            # 2. TIE_AT_FLOOR Guard:
+            if len(same_item_listings) >= 2:
+                distinct_sellers = {
+                    str(a.get("auctioneer") or a.get("seller") or "")
+                    for a in same_item_listings
+                }
+                distinct_sellers.discard("")
+                if len(distinct_sellers) >= 2:
+                    p_list = sorted(
+                        int(a.get("starting_bid", 0)) // max(1, int(a.get("_unit_count", 1)))
+                        for a in same_item_listings
+                        if int(a.get("starting_bid", 0)) > 0
+                    )
+                    if len(p_list) >= 2 and p_list[1] <= p_list[0] * 1.01:
+                        if unit_buy_price <= p_list[0] * 1.01:
+                            return _reject("TIE_AT_FLOOR", lane=LANE_FLOOR, path="DELTA_GUARD")
+
         # Stage 1: Sales Velocity & Volume Validation check (R2)
         if self.config.ENABLE_VELOCITY_FILTER and self.velocity_tracker is not None:
             if not self.velocity_tracker.is_velocity_sufficient(internal_id):
-                return _reject("insufficient_velocity")
+                clean_id = internal_id.strip().upper()
+                is_warming = self.is_cold_start or (
+                    hasattr(self.velocity_tracker, "is_warming_up") and self.velocity_tracker.is_warming_up()
+                )
+                if is_warming and clean_id in PROGRESSION_STAPLES:
+                    intermediates["velocity_warmup_pass"] = True
+                else:
+                    return _reject("insufficient_velocity")
 
         # Stage 1.5: Early Craft Cost Ceiling Gate (Clean craftable bait rejection)
         is_upgraded = self.is_upgraded_item(decoded_data)
@@ -2102,7 +2709,7 @@ class FlipEvaluator:
                 if buy_price >= (craft_cost * getattr(self.config, "CRAFT_BUY_THRESHOLD_RATIO", 0.95)):
                     return _reject("craft_ceiling", lane=LANE_FLOOR, path="CRAFT_CEILING")
 
-        sorted_prices = self._price_cache.get(internal_id, [])
+        sorted_prices = self._price_cache.get(cache_id) or self._price_cache.get(internal_id, [])
 
         # Stage 2: Specialized Evaluation Paths (Pets and Attribute God Rolls)
         if decoded_data.get("is_pet"):
@@ -2176,12 +2783,13 @@ class FlipEvaluator:
         auction: dict[str, Any],
         decoded_data: dict[str, Any],
         now_ms: Optional[float] = None,
+        delta_context: Optional[dict[str, Any]] = None,
     ) -> Optional[FlipResult]:
         """
         Evaluate a single BIN auction listing against market price baselines.
         Calls evaluate_decision and returns the accepted FlipResult, or None.
         """
-        decision = self.evaluate_decision(auction, decoded_data, now_ms=now_ms)
+        decision = self.evaluate_decision(auction, decoded_data, now_ms=now_ms, delta_context=delta_context)
         return decision.flip if decision.accepted else None
 
     evaluate = evaluate_decision

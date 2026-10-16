@@ -12,7 +12,7 @@ from typing import Any, Union
 import nbtlib
 
 from src.constants.pet_levels import calculate_pet_level
-from src.constants.prestige import get_prestige_tier
+from src.constants.prestige import get_prestige_tier, is_crimson_isle_item
 
 COLOR_CODE_PATTERN = re.compile(r"§[0-9a-fk-or]", re.IGNORECASE)
 
@@ -114,6 +114,55 @@ def parse_divan_gemstone_chambers(internal_id: str, extra_attrs: Any) -> int:
     return 0
 
 
+try:
+    import orjson
+except ImportError:
+    orjson = None
+
+_DEFAULT_PAYLOAD = {
+    "internal_id": "UNKNOWN",
+    "item_name": "Unknown Item",
+    "modifier": "",
+    "rarity_upgrades": 0,
+    "dungeon_stars": 0,
+    "master_stars": 0,
+    "gemstones": [],
+    "enchantments": {},
+    "attributes": {},
+    "is_pet": False,
+    "pet_type": "",
+    "pet_tier": "",
+    "effective_tier": "",
+    "pet_level": 1,
+    "pet_exp": 0.0,
+    "pet_held_item": "",
+    "pet_skin": None,
+    "prestige_tier": "BASIC",
+    "gemstone_chambers": 0,
+    "art_of_war_count": 0,
+    "wood_singularity_count": 0,
+    "transmission_tuners": 0,
+    "hot_potato_count": 0,
+    "pet_candy_used": 0,
+    "ability_scrolls": [],
+    "drill_part_engine": None,
+    "drill_part_fuel_tank": None,
+    "drill_part_upgrade_module": None,
+    "talisman_enrichment": None,
+    "count": 1,
+    "item_uuid": None,
+    "item_instance_uuid": None,
+}
+
+_NBT_CACHE: dict[str, dict[str, Any]] = {}
+_MAX_NBT_CACHE_SIZE = 100_000
+
+
+def clear_nbt_cache() -> None:
+    """Clear in-memory NBT decode cache."""
+    _NBT_CACHE.clear()
+
+
 def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, Any]:
     """
     Decode Hypixel base64-encoded, gzip-compressed item NBT bytes.
@@ -137,65 +186,37 @@ def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, An
         - wood_singularity_count: Wood Singularity applied (0 or 1)
         - transmission_tuners: Transmission Tuners applied (0-4)
     """
-    default_payload = {
-        "internal_id": "UNKNOWN",
-        "item_name": "Unknown Item",
-        "modifier": "",
-        "rarity_upgrades": 0,
-        "dungeon_stars": 0,
-        "master_stars": 0,
-        "gemstones": [],
-        "enchantments": {},
-        "attributes": {},
-        "is_pet": False,
-        "pet_type": "",
-        "pet_tier": "",
-        "effective_tier": "",
-        "pet_level": 1,
-        "pet_exp": 0.0,
-        "pet_held_item": "",
-        "pet_skin": None,
-        "prestige_tier": "BASIC",
-        "gemstone_chambers": 0,
-        "art_of_war_count": 0,
-        "wood_singularity_count": 0,
-        "transmission_tuners": 0,
-        "hot_potato_count": 0,
-        "pet_candy_used": 0,
-        "ability_scrolls": [],
-        "drill_part_engine": None,
-        "drill_part_fuel_tank": None,
-        "drill_part_upgrade_module": None,
-        "talisman_enrichment": None,
-        "count": 1,
-    }
-
     if not raw_b64:
-        return default_payload
+        return _DEFAULT_PAYLOAD.copy()
 
     # Handle dictionary wrapper if present (e.g., {"data": "..."})
     if isinstance(raw_b64, dict):
         raw_b64 = raw_b64.get("data", "")
         if not raw_b64:
-            return default_payload
+            return _DEFAULT_PAYLOAD.copy()
+
+    if isinstance(raw_b64, str):
+        cached = _NBT_CACHE.get(raw_b64)
+        if cached is not None:
+            return cached.copy()
 
     try:
         compressed_bytes = base64.b64decode(raw_b64)
         nbt_bytes = gzip.decompress(compressed_bytes)
         nbt_file = nbtlib.File.from_fileobj(io.BytesIO(nbt_bytes))
     except Exception:
-        return default_payload
+        return _DEFAULT_PAYLOAD.copy()
 
     try:
         root_tag = nbt_file.root if hasattr(nbt_file, "root") else nbt_file
         items_list = root_tag.get("i", [])
         if not items_list or len(items_list) == 0:
-            return default_payload
+            return _DEFAULT_PAYLOAD.copy()
 
         first_item = items_list[0]
         item_tag = first_item.get("tag", {})
         if not item_tag:
-            return default_payload
+            return _DEFAULT_PAYLOAD.copy()
 
         item_count = 1
         count_tag = first_item.get("Count")
@@ -219,8 +240,9 @@ def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, An
         rarity_upgrades = int(extra_attrs.get("rarity_upgrades", 0))
 
         # Dungeon stars / upgrade level
+        has_dungeon_level = "dungeon_item_level" in extra_attrs
         stars = 0
-        if "dungeon_item_level" in extra_attrs:
+        if has_dungeon_level:
             try:
                 stars = max(stars, int(extra_attrs["dungeon_item_level"]))
             except (ValueError, TypeError):
@@ -231,8 +253,14 @@ def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, An
             except (ValueError, TypeError):
                 pass
 
-        # Master stars: Stars 6-10 correspond to Master Stars 1-5
-        master_stars = max(0, min(stars - 5, 5)) if stars > 5 else 0
+        # Master stars: Stars 6-10 correspond to Master Stars 1-5 ONLY on dungeon items.
+        # Crimson Isle gear (Kuudra armor/equipment, crimson rods, volcanic weapons) uses
+        # Crimson Essence stars (1-10), which are NOT Catacombs Master Stars.
+        # Items without dungeon_item_level are also non-dungeon items and cannot hold Master Stars.
+        if is_crimson_isle_item(internal_id) or not has_dungeon_level:
+            master_stars = 0
+        else:
+            master_stars = max(0, min(stars - 5, 5)) if stars > 5 else 0
 
         # Slotted gemstones extraction
         gems_raw = extra_attrs.get("gems", {})
@@ -273,12 +301,11 @@ def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, An
             is_pet = True
             if pet_raw_info:
                 try:
-                    if isinstance(pet_raw_info, str):
-                        pet_data = json.loads(pet_raw_info)
-                    elif isinstance(pet_raw_info, dict):
+                    if isinstance(pet_raw_info, dict):
                         pet_data = pet_raw_info
                     else:
-                        pet_data = json.loads(str(pet_raw_info))
+                        raw_str = str(pet_raw_info)
+                        pet_data = orjson.loads(raw_str) if orjson is not None else json.loads(raw_str)
                     pet_type = str(pet_data.get("type", "UNKNOWN")).strip().upper()
                     pet_tier = str(pet_data.get("tier", "COMMON")).strip().upper()
                     pet_exp = float(pet_data.get("exp", 0.0))
@@ -379,11 +406,12 @@ def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, An
         prestige_tier = get_prestige_tier(internal_id)
         item_uuid = str(extra_attrs.get("uuid", "")).strip() or None
 
-        return {
+        result = {
             "internal_id": internal_id,
             "item_name": clean_name or "Unknown Item",
             "modifier": modifier,
             "item_uuid": item_uuid,
+            "item_instance_uuid": item_uuid,
             "rarity_upgrades": rarity_upgrades,
             "dungeon_stars": stars,
             "master_stars": master_stars,
@@ -412,5 +440,12 @@ def decode_item_bytes(raw_b64: Union[str, dict[str, Any], None]) -> dict[str, An
             "talisman_enrichment": talisman_enrichment,
             "count": item_count,
         }
+
+        if isinstance(raw_b64, str):
+            if len(_NBT_CACHE) >= _MAX_NBT_CACHE_SIZE:
+                _NBT_CACHE.clear()
+            _NBT_CACHE[raw_b64] = result
+
+        return result.copy()
     except Exception:
-        return default_payload
+        return _DEFAULT_PAYLOAD.copy()

@@ -8,6 +8,7 @@ import time
 from typing import Any, Optional
 
 from src.config import Settings
+from src.constants.prestige import is_crimson_isle_item
 from src.db import DatabaseManager
 from src.nbt_decoder import decode_item_bytes
 
@@ -57,7 +58,7 @@ def generate_features_hash(decoded: dict[str, Any]) -> str:
     """
     internal_id = str(decoded.get("internal_id", "UNKNOWN")).strip().upper()
     stars = int(decoded.get("dungeon_stars", 0))
-    m_stars = int(decoded.get("master_stars", 0))
+    m_stars = 0 if is_crimson_isle_item(internal_id) else int(decoded.get("master_stars", 0))
     recomb = int(decoded.get("rarity_upgrades", 0))
     reforge = str(decoded.get("modifier", "")).strip().lower()
     chambers = int(decoded.get("gemstone_chambers", 0))
@@ -128,7 +129,7 @@ class SalesIngestor:
         Returns:
             int: Number of sales successfully recorded.
         """
-        ingested_count = 0
+        sales_batch: list[dict[str, Any]] = []
         now_ms = int(time.time() * 1000)
 
         for auction in raw_auctions:
@@ -170,7 +171,8 @@ class SalesIngestor:
                 continue
 
             features_hash = generate_features_hash(decoded)
-            normalized_tier = int(decoded.get("dungeon_stars", 0)) + int(decoded.get("master_stars", 0))
+            m_stars = 0 if is_crimson_isle_item(internal_id) else int(decoded.get("master_stars", 0))
+            normalized_tier = int(decoded.get("dungeon_stars", 0)) + m_stars
 
             time_to_sell_s: Optional[float] = None
             raw_start = auction.get("start")
@@ -182,19 +184,19 @@ class SalesIngestor:
                 except (ValueError, TypeError):
                     pass
 
-            success = self.db.record_sale(
-                uuid=auction_uuid,
-                internal_id=internal_id,
-                price=price,
-                buyer_uuid=auction.get("buyer"),
-                seller_uuid=auction.get("seller"),
-                timestamp=timestamp,
-                features_json=decoded,
-                features_hash=features_hash,
-                normalized_tier=normalized_tier,
-                time_to_sell_s=time_to_sell_s,
-            )
-            if success:
-                ingested_count += 1
+            sales_batch.append({
+                "uuid": auction_uuid,
+                "internal_id": internal_id,
+                "price": price,
+                "buyer_uuid": auction.get("buyer"),
+                "seller_uuid": auction.get("seller"),
+                "timestamp": timestamp,
+                "features_json": decoded,
+                "features_hash": features_hash,
+                "normalized_tier": normalized_tier,
+                "time_to_sell_s": time_to_sell_s,
+            })
 
-        return ingested_count
+        if sales_batch:
+            return self.db.record_sales_batch(sales_batch)
+        return 0

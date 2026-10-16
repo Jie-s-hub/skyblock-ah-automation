@@ -112,18 +112,33 @@ class OutcomeLabeler:
             # 1. Determine Status: Did the flagged listing itself sell?
             flagged_sale = self.db.get_sale(auction_uuid)
             listing_sold_after_s: float | None = None
+            resolved_st = str(alert.get("resolved_status") or "")
+            survival_s = float(alert.get("survival_duration_seconds") or alert.get("survival_seconds") or 0.0)
+
             if flagged_sale is not None:
                 sale_ts = int(flagged_sale.get("timestamp", alerted_at))
                 start_ref = int(listing_start) if listing_start and int(listing_start) > 0 else alerted_at
                 listing_sold_after_s = max(0.0, (sale_ts - start_ref) / 1000.0)
 
-                if listing_sold_after_s <= snipe_survival_seconds:
+                # Vanished within 1-2 ticks or <= 60s and claimed by buyer
+                has_buyer = bool(flagged_sale.get("buyer_uuid"))
+                if (listing_sold_after_s <= 60.0 and has_buyer) or (
+                    abs(sale_ts - alerted_at) <= 30_000 and has_buyer
+                ) or resolved_st == "SOLD_FAST_CLAIMED":
+                    status = "SOLD_FAST_CLAIMED"
+                elif listing_sold_after_s <= snipe_survival_seconds:
                     status = "SOLD_FAST"
                 else:
                     status = "SOLD_SLOW"
             else:
-                status = "UNSOLD"
                 listing_sold_after_s = None
+                # Vanished early before end without sale record -> seller cancelled
+                if resolved_st == "SELLER_CANCELLED":
+                    status = "SELLER_CANCELLED"
+                elif resolved_st in ("SURVIVED_MULTI_TICK", "STALE") or survival_s >= 180.0:
+                    status = "SURVIVED_MULTI_TICK"
+                else:
+                    status = "UNSOLD"
 
             # 2. Determine target_hit: A relaxed-hash comparable sold within the horizon at >= 95% of target
             target_hit = 0
@@ -138,6 +153,7 @@ class OutcomeLabeler:
                 limit=200,
             )
 
+            first_comp_sale_price: int | None = None
             for s in recent_sales:
                 # Exclude the flagged listing buy event itself if recorded with buy_price
                 if str(s.get("uuid")) == auction_uuid and int(s.get("price", 0)) == buy_price:
@@ -163,9 +179,13 @@ class OutcomeLabeler:
                     s_hash = generate_relaxed_features_hash(s_decoded)
                     is_match = s_hash == cand_relaxed_hash
 
-                if is_match and int(s.get("price", 0)) >= target_hit_threshold:
-                    target_hit = 1
-                    break
+                if is_match:
+                    s_price = int(s.get("price", 0))
+                    if first_comp_sale_price is None and s_price > 0:
+                        first_comp_sale_price = s_price
+                    if s_price >= target_hit_threshold:
+                        target_hit = 1
+                        break
 
             # 3. Determine realized_net_margin: Ledger rows override with realized PnL
             realized_net_margin: float | None = None
@@ -182,11 +202,9 @@ class OutcomeLabeler:
                 elif p_sell is not None and p_buy > 0:
                     net_rev = calculate_net_revenue(int(p_sell), derpy_active=p_derpy)
                     realized_net_margin = round(((net_rev - p_buy) / float(p_buy)) * 100.0, 2)
-            elif flagged_sale is not None and buy_price > 0:
-                sale_price = int(flagged_sale.get("price", 0))
-                if sale_price > 0:
-                    net_rev = calculate_net_revenue(sale_price, derpy_active=derpy_active)
-                    realized_net_margin = round(((net_rev - buy_price) / float(buy_price)) * 100.0, 2)
+            elif first_comp_sale_price is not None and buy_price > 0:
+                net_rev = calculate_net_revenue(first_comp_sale_price, derpy_active=derpy_active)
+                realized_net_margin = round(((net_rev - buy_price) / float(buy_price)) * 100.0, 2)
 
             # Record outcome
             success = self.db.record_alert_outcome(

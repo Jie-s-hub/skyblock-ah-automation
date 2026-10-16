@@ -308,7 +308,7 @@ async def run_e2e_verification() -> None:
     assert res_necron.is_priority is True, "Necron Chestplate must be flagged is_priority=True"
     assert res_necron.staple_category == "WITHER_ARMOR", "Staple category must be WITHER_ARMOR"
     assert 8.0 <= res_necron.margin_pct < 15.0, f"Expected margin in [8.0%, 15.0%), got {res_necron.margin_pct}%"
-    assert res_necron.net_profit == 4_100_000, f"Expected 4,100,000 coins profit, got {res_necron.net_profit}"
+    assert res_necron.net_profit == 3_650_000, f"Expected 3,650,000 coins profit, got {res_necron.net_profit}"
     print(
         f"  [PASS] Scenario 4: Progression staple Wither armor (NECRON_CHESTPLATE) accepted at {res_necron.margin_pct:.2f}% margin (relaxed threshold >= 8.0%, standard threshold >= 15.0%)."
     )

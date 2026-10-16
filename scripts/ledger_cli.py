@@ -9,6 +9,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+# Ensure Windows consoles don't crash on Minecraft symbols or emojis
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Ensure project root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -258,7 +270,47 @@ def handle_player_stats(args: argparse.Namespace, db: DatabaseManager) -> int:
     print(f"  Open Positions (HELD):  {metrics['held_items_count']}")
     print(f"  Capital Deployed (HELD):{metrics['unrealized_capital_deployed']:,} coins")
     print("=" * 60 + "\n")
+
+    if getattr(args, "webhook", False):
+        return handle_webhook_report(args, db)
     return 0
+
+
+def handle_webhook_report(args: argparse.Namespace, db: DatabaseManager) -> int:
+    """Send profile AH tracker report embed to Discord webhook."""
+    import asyncio
+
+    from src.config import Settings
+    from src.notifier import DiscordNotifier
+    from src.player_tracker import PlayerTradeTracker
+
+    dry_run = getattr(args, "dry_run", False)
+    player = getattr(args, "player", None) or "ongvvkk"
+    limit = getattr(args, "limit", 5)
+
+    config = Settings(DRY_RUN=dry_run, TRACKED_PLAYER_IGN=player)
+
+    async def _dispatch() -> bool:
+        async with PlayerTradeTracker(db=db, config=config) as tracker:
+            await tracker.resolve_identity()
+            metrics = tracker.get_portfolio_metrics()
+            open_positions = tracker.get_open_positions(limit=limit)
+            recent_trades = tracker.get_recent_trades(limit=limit)
+
+            async with DiscordNotifier(config=config) as notifier:
+                return await notifier.send_profile_tracker_report(
+                    metrics=metrics,
+                    open_positions=open_positions,
+                    recent_trades=recent_trades,
+                )
+
+    success = asyncio.run(_dispatch())
+    if success:
+        print(f"✅ Successfully dispatched profile AH tracker report for '{player}' to Discord webhook.")
+        return 0
+    else:
+        print(f"❌ Failed to dispatch profile AH tracker report for '{player}'.", file=sys.stderr)
+        return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -296,6 +348,15 @@ def build_parser() -> argparse.ArgumentParser:
     # Subcommand: player-stats
     p_pstats = subparsers.add_parser("player-stats", help="Display real-time player portfolio metrics")
     p_pstats.add_argument("--player", type=str, default="ongvvkk", help="Tracked player username (default: ongvvkk)")
+    p_pstats.add_argument("--webhook", action="store_true", help="Also dispatch report to Discord webhook")
+    p_pstats.add_argument("--dry-run", action="store_true", help="Print Discord embed to console without sending")
+    p_pstats.add_argument("--limit", type=int, default=5, help="Number of holdings/trades to include in embed")
+
+    # Subcommand: webhook-report
+    p_wh = subparsers.add_parser("webhook-report", help="Send profile AH tracker report to Discord webhook")
+    p_wh.add_argument("--player", type=str, default="ongvvkk", help="Tracked player username (default: ongvvkk)")
+    p_wh.add_argument("--dry-run", action="store_true", help="Print Discord embed to console without sending")
+    p_wh.add_argument("--limit", type=int, default=5, help="Number of holdings/trades to include in embed (default: 5)")
 
     return parser
 
@@ -315,6 +376,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return handle_report(args, db)
         elif args.command == "player-stats":
             return handle_player_stats(args, db)
+        elif args.command in ("webhook-report", "profile-webhook"):
+            return handle_webhook_report(args, db)
         else:
             parser.print_help()
             return 1

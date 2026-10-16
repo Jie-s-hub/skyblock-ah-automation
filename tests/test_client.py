@@ -86,12 +86,13 @@ async def test_fetch_page_rate_limit_backoff(base_config: Settings):
     """Test fetch_page handles 429 response by waiting and retrying."""
     client = HypixelClient(base_config)
 
-    resp_429 = AsyncMock()
+    resp_429 = MagicMock()
     resp_429.status = 429
     resp_429.headers = {"Retry-After": "0.1"}
 
     resp_200 = AsyncMock()
     resp_200.status = 200
+    resp_200.headers = {}
     resp_200.json = AsyncMock(return_value={"success": True, "totalPages": 1})
 
     cm_429 = MagicMock()
@@ -168,7 +169,7 @@ async def test_fetch_ended_auctions_rate_limit_backoff(base_config: Settings):
     """Test fetch_ended_auctions handles 429 rate limiting with retry and exponential backoff."""
     client = HypixelClient(base_config)
 
-    resp_429 = AsyncMock()
+    resp_429 = MagicMock()
     resp_429.status = 429
     resp_429.headers = {"Retry-After": "0.1"}
 

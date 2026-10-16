@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-# Exact per-star costs for star levels 1 through 5:
+from src.constants.prestige import is_crimson_isle_item
+
+# Exact per-star costs for star levels 1 through 5 (and 1 through 10 for Crimson gear):
 # Wither Armor: 100, 200, 350, 600, 1000 Wither Essence
 WITHER_ARMOR_STAR_COSTS = [100, 200, 350, 600, 1000]
-CRIMSON_ARMOR_STAR_COSTS = [100, 200, 350, 600, 1000]
+# Crimson Isle gear: 1-10 stars use Crimson Essence (100 up to 5500 per star)
+CRIMSON_ARMOR_STAR_COSTS = [100, 200, 350, 600, 1000, 1500, 2200, 3000, 4000, 5500]
 WITHER_WEAPONS_STAR_COSTS = [100, 200, 350, 600, 1000]
 DEFAULT_DUNGEON_STAR_COSTS = [50, 100, 150, 200, 250]
 
@@ -109,9 +112,10 @@ def get_star_essence_cost(internal_id: str, stars: int) -> tuple[str, int]:
     if upper_id in WITHER_WEAPON_IDS:
         return ("ESSENCE_WITHER", sum(WITHER_WEAPONS_STAR_COSTS[:star_level]))
 
-    # 3. Crimson Isle Kuudra Armor
-    if any(upper_id.startswith(prefix) for prefix in CRIMSON_ARMOR_PREFIXES):
-        return ("ESSENCE_CRIMSON", sum(CRIMSON_ARMOR_STAR_COSTS[:star_level]))
+    # 3. Crimson Isle items (Kuudra Armor, Equipment, Fishing Rods, Volcanic Gear) - up to 10 stars
+    if is_crimson_isle_item(upper_id) or any(upper_id.startswith(prefix) for prefix in CRIMSON_ARMOR_PREFIXES):
+        crimson_star_level = min(max(stars, 0), 10)
+        return ("ESSENCE_CRIMSON", sum(CRIMSON_ARMOR_STAR_COSTS[:crimson_star_level]))
 
     # 4. Dragon Gear
     if any(upper_id.startswith(prefix) for prefix in DRAGON_ARMOR_PREFIXES) or "DRAGON" in upper_id:

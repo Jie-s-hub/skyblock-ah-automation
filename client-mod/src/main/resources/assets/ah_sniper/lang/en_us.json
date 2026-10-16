@@ -1,6 +1,10 @@
 {
-  "key.categories.ah_sniper": "SkyBlock AH Sniper",
+  "key.categories.ah_sniper": "Hypixel AH Sniper",
+  "key.category.ah_sniper.main": "Hypixel AH Sniper",
+  "category.ahsniper": "Hypixel AH Sniper",
   "key.ah_sniper.open": "Open Snipes Viewer",
+  "key.ah_sniper.toggle_auto_inspect": "Toggle Auto-Inspect",
+  "key.ahsniper.toggle_auto_inspect": "Toggle Auto-Inspect",
   "gui.ah_sniper.title": "Active Auction House Snipes",
   "gui.ah_sniper.no_flips": "No active snipes detected. Waiting for local WebSocket stream (ws://127.0.0.1:8765)...",
   "gui.ah_sniper.inspect": "Inspect",

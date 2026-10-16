@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import ipaddress
 import json
@@ -80,6 +81,8 @@ def build_flip_payload(flip: FlipResult) -> dict[str, Any]:
 
     return {
         "uuid": str(flip.auction_uuid),
+        "item_instance_uuid": getattr(flip, "item_instance_uuid", None),
+        "auction_start_ms": int(getattr(flip, "listing_start", 0) or getattr(flip, "auction_start_ms", 0) or 0),
         "name": str(flip.item_name),
         "buy_price": int(flip.buy_price),
         "target_resell": int(flip.target_resell_price),
@@ -288,9 +291,12 @@ class LocalWebSocketBroadcaster:
 
         for client in list(self.clients):
             try:
-                await client.send(message)
+                if getattr(client, "closed", False):
+                    disconnected.add(client)
+                    continue
+                await asyncio.wait_for(client.send(message), timeout=1.0)
                 sent_count += 1
-            except Exception as err:
+            except (asyncio.TimeoutError, Exception) as err:
                 logger.warning("Failed to send flip to client: %s", err)
                 disconnected.add(client)
 

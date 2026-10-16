@@ -168,7 +168,7 @@ class BazaarCache:
             self._sell_prices = {k.strip().upper(): float(v) for k, v in sell_prices.items()}
         else:
             self._sell_prices = dict(self._buy_prices)
-        self._last_updated = ts
+        self._last_updated = max(ts, self._last_updated + 1e-6)
         for k, v in self._buy_prices.items():
             self._price_history[k].append((ts, v))
 

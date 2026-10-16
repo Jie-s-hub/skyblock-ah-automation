@@ -10,6 +10,14 @@ from src.constants.recipes import get_recipe
 logger = logging.getLogger(__name__)
 
 
+_CRAFT_COST_CACHE: dict[tuple[str, int, Any], Optional[int]] = {}
+
+
+def clear_craft_cost_cache() -> None:
+    """Clear cached craft cost calculations."""
+    _CRAFT_COST_CACHE.clear()
+
+
 def calculate_craft_cost(
     internal_id: str,
     bazaar_cache: Any,
@@ -34,17 +42,25 @@ def calculate_craft_cost(
         return None
 
     clean_id = internal_id.strip().upper()
+    recipe = get_recipe(clean_id)
+    if not recipe:
+        return None
+
+    is_top_level = _visited is None
+    cache_key = None
+    if is_top_level and getattr(bazaar_cache, "_last_updated", None) is not None:
+        cache_key = (clean_id, id(bazaar_cache), getattr(bazaar_cache, "_last_updated", None), id(ah_cache))
+        if cache_key in _CRAFT_COST_CACHE:
+            return _CRAFT_COST_CACHE[cache_key]
+
     if _visited is None:
         _visited = set()
     if clean_id in _visited:
         return None
     _visited.add(clean_id)
 
-    recipe = get_recipe(clean_id)
-    if not recipe:
-        return None
-
     total_cost: float = 0.0
+    used_ah_cache = False
 
     for ingredient_id, quantity in recipe.items():
         if quantity <= 0:
@@ -75,12 +91,15 @@ def calculate_craft_cost(
                 ah_val = ah_cache.get_base_lbin(ingredient_id)
                 if ah_val is not None and ah_val > 0:
                     unit_price = float(ah_val)
+                    used_ah_cache = True
             elif isinstance(ah_cache, dict):
                 raw_ah = ah_cache.get(ingredient_id) or ah_cache.get(ingredient_id.strip().upper())
                 if isinstance(raw_ah, (int, float)) and raw_ah > 0:
                     unit_price = float(raw_ah)
+                    used_ah_cache = True
                 elif isinstance(raw_ah, list) and raw_ah:
                     unit_price = float(raw_ah[0])
+                    used_ah_cache = True
 
         # 3. Third attempt: Recursive craft cost if ingredient is craftable
         if (unit_price is None or unit_price <= 0) and get_recipe(ingredient_id):
@@ -92,6 +111,8 @@ def calculate_craft_cost(
             )
             if sub_cost is not None and sub_cost > 0:
                 unit_price = float(sub_cost)
+                if ah_cache is not None:
+                    used_ah_cache = True
 
         # Fail-safe: if any ingredient is missing or has a non-positive price, abort calculation
         if unit_price is None or unit_price <= 0:
@@ -100,6 +121,8 @@ def calculate_craft_cost(
                 ingredient_id,
                 clean_id,
             )
+            if is_top_level and cache_key is not None and not used_ah_cache and ah_cache is None:
+                _CRAFT_COST_CACHE[cache_key] = None
             return None
 
         # Bazaar Shock Guard: if enabled and ingredient price is shocked, abort calculation
@@ -110,8 +133,15 @@ def calculate_craft_cost(
                     ingredient_id,
                     clean_id,
                 )
+                if is_top_level and cache_key is not None and not used_ah_cache:
+                    _CRAFT_COST_CACHE[cache_key] = None
                 return None
 
         total_cost += float(quantity) * unit_price
 
-    return int(round(total_cost))
+    res = int(round(total_cost))
+    if is_top_level and cache_key is not None and not used_ah_cache:
+        if len(_CRAFT_COST_CACHE) >= 5000:
+            _CRAFT_COST_CACHE.clear()
+        _CRAFT_COST_CACHE[cache_key] = res
+    return res

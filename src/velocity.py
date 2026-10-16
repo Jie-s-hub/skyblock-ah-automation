@@ -216,6 +216,14 @@ class SalesVelocityTracker:
 
         return True
 
+    def total_tracked_sales(self) -> int:
+        """Return total count of tracked sales across all items within rolling window."""
+        return sum(len(q) for q in self.sales.values())
+
+    def is_warming_up(self, min_total_sales: int = 50) -> bool:
+        """Check if tracker has accumulated sufficient historical sales volume."""
+        return self.total_tracked_sales() < min_total_sales
+
     def save_to_disk(self, file_path: Optional[str | Path] = None) -> None:
         """Persist sales timestamps to disk in JSON format."""
         target = Path(file_path or self.config.VELOCITY_CACHE_FILE or "data/sales_velocity.json")
@@ -265,3 +273,29 @@ class SalesVelocityTracker:
 
         logger.info("Loaded sales velocity cache from %s (%d active items)", target, restored_items)
         return restored_items
+
+    def seed_from_db(self, db: Any) -> int:
+        """Seed velocity tracking history from SQLite sales_history table."""
+        if db is None:
+            return 0
+        try:
+            now_ms = int(time.time() * 1000)
+            window_ms = int(float(self.config.VELOCITY_WINDOW_HOURS) * 3600.0 * 1000)
+            cutoff = now_ms - window_ms
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT internal_id, timestamp FROM sales_history WHERE timestamp >= ? ORDER BY timestamp ASC",
+                (cutoff,),
+            )
+            rows = cursor.fetchall()
+            count = 0
+            for internal_id, ts_ms in rows:
+                if internal_id and internal_id != "UNKNOWN":
+                    self.record_sale(internal_id, float(ts_ms) / 1000.0)
+                    count += 1
+            logger.info("Seeded %d sales across %d items from database history into velocity tracker.", count, len(self.sales))
+            return count
+        except Exception as err:
+            logger.warning("Failed to seed sales velocity from database: %s", err)
+            return 0

@@ -179,6 +179,63 @@ def get_pet_level_premium(pet_type: str, tier: str, level: int) -> int:
     return 0
 
 
+COLLECTOR_ENDGAME_PETS = {"GOLDEN_DRAGON", "ENDER_DRAGON", "BLACK_CAT", "GREG", "DRAGON"}
+UTILITY_PETS = {"ELEPHANT", "MOOSHROOM_COW", "SCATHA", "BAL", "AMMONITE", "SILVERFISH", "OCELOT", "MONKEY"}
+
+
+def calculate_category_candy_penalty(pet_type: str, candy_used: int) -> float:
+    """
+    Compute pet-category specific candy penalty:
+    - 12-18% penalty on collector/endgame combat pets when candyUsed > 0
+    - 0-3% penalty on skill/farming/mining utility pets
+    - 0-10% standard linear penalty for general pets
+    """
+    if candy_used <= 0:
+        return 0.0
+
+    clean_type = pet_type.strip().upper()
+    clamped_candy = max(0, min(10, candy_used))
+
+    if clean_type in COLLECTOR_ENDGAME_PETS:
+        return round(min(0.18, 0.12 + (clamped_candy * 0.006)), 4)
+    if clean_type in UTILITY_PETS:
+        return round(min(0.03, clamped_candy * 0.003), 4)
+
+    return round(min(0.10, clamped_candy * 0.01), 4)
+
+
+def interpolate_pet_xp_value(
+    pet_type: str,
+    tier: str,
+    exp: float,
+    base_price: int,
+    cap_price: int,
+    candy_used: int = 0,
+    alpha: float = 1.20,
+) -> int:
+    """
+    Continuous cumulative pet XP interpolation:
+    Value(L) = P_base + ((XP(L) - XP_base) / (XP_cap - XP_base))^alpha * (P_cap - P_base) * (1 - d_candy)
+    """
+    clean_type = pet_type.strip().upper()
+    clean_tier = tier.strip().upper()
+    if clean_tier not in PET_MAX_XP:
+        clean_tier = "LEGENDARY"
+
+    xp_cap = GDRAG_MAX_XP if clean_type == "GOLDEN_DRAGON" else PET_MAX_XP[clean_tier]
+    xp_base = 0.0
+
+    clamped_exp = max(xp_base, min(float(exp), xp_cap))
+    xp_ratio = (clamped_exp - xp_base) / (xp_cap - xp_base) if xp_cap > xp_base else 0.0
+    convex_ratio = xp_ratio**alpha
+
+    d_candy = calculate_category_candy_penalty(clean_type, candy_used)
+    spread = max(0, cap_price - base_price)
+    interpolated = base_price + int(round(convex_ratio * spread))
+    discounted = int(round(interpolated * (1.0 - d_candy)))
+    return max(int(base_price * (1.0 - d_candy)), discounted)
+
+
 # Data-driven pet max-level caps
 PET_MAX_LEVEL_CAPS: dict[str, int] = {
     "GOLDEN_DRAGON": 200,
@@ -250,7 +307,19 @@ def get_pet_bucket_key(
     (effective_internal_id, level_bracket, candy_used_bool, skin_str, held_item_group)
     """
     pet_type = str(decoded.get("pet_type", "")).strip().upper()
-    effective_tier = str(decoded.get("effective_tier") or decoded.get("pet_tier", "COMMON")).strip().upper()
+    pet_tier = str(decoded.get("pet_tier", "COMMON")).strip().upper()
+    held_item = str(decoded.get("pet_held_item", "") or "").strip().upper()
+    raw_eff_tier = str(decoded.get("effective_tier") or "").strip().upper()
+    if raw_eff_tier:
+        effective_tier = raw_eff_tier
+    else:
+        effective_tier = pet_tier
+        if held_item == "PET_ITEM_TIER_BOOST":
+            rarity_order = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY", "MYTHIC"]
+            if pet_tier in rarity_order:
+                idx = rarity_order.index(pet_tier)
+                if idx < len(rarity_order) - 1:
+                    effective_tier = rarity_order[idx + 1]
     effective_internal_id = f"PET_{pet_type}_{effective_tier}"
 
     level = int(decoded.get("pet_level", 1))
@@ -265,7 +334,6 @@ def get_pet_bucket_key(
         else "none"
     )
 
-    held_item = decoded.get("pet_held_item", "")
     held_group = get_held_item_group(held_item, bazaar_cache=bazaar_cache, minor_threshold=minor_threshold)
 
     return (effective_internal_id, bracket, candy_used, skin, held_group)
